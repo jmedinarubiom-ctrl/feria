@@ -13,3 +13,6 @@ dist/
 .expo/
 *.log
 .DS_Store
+
+# Registros de ./feria.sh
+.registro/
