@@ -1,3 +1,4 @@
+import { CONFIG } from '../config.ts';
 import type {
   CobroCreado, DatosCobro, DatosReembolso, EstadoCobro, Pasarela, ReembolsoCreado,
 } from './pasarela.ts';
@@ -49,15 +50,16 @@ export type ConfigMercadoPago = {
 };
 
 export function configDesdeEntorno(): ConfigMercadoPago | null {
-  const { MP_ACCESS_TOKEN, MP_BASE, MP_SANDBOX, URL_PUBLICA } = process.env;
-  if (!MP_ACCESS_TOKEN || !URL_PUBLICA) return null;
+  const { MP_ACCESS_TOKEN, MP_BASE, MP_SANDBOX } = process.env;
+  const publica = CONFIG.urlPublica;
+  if (!MP_ACCESS_TOKEN || !publica) return null;
   return {
     accessToken: MP_ACCESS_TOKEN,
     sandboxViejo: MP_SANDBOX === '1',
     base: MP_BASE ?? 'https://api.mercadopago.com',
-    urlNotificacion: `${URL_PUBLICA}/webhooks/mercadopago`,
-    urlRetorno: `${URL_PUBLICA}/pagos/retorno`,
-    publica: esPublica(URL_PUBLICA),
+    urlNotificacion: `${publica}/webhooks/mercadopago`,
+    urlRetorno: `${publica}/pagos/retorno`,
+    publica: esPublica(publica),
   };
 }
 

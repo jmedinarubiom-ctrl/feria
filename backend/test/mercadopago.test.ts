@@ -452,3 +452,24 @@ test('distingue una dirección pública de una local', () => {
     assert.equal(esPublica(u), false, u);
   }
 });
+
+test('la dirección pública se normaliza venga como venga', async () => {
+  // Render entrega el host pelado, sin esquema. Sin normalizarlo el
+  // webhook queda apuntando a una dirección inválida y los pagos no
+  // se confirman solos — y eso solo se descubre en producción.
+  const previo = { ...process.env };
+  try {
+    for (const [entrada, esperada] of [
+      ['feria.onrender.com', 'https://feria.onrender.com'],
+      ['https://feria.cl', 'https://feria.cl'],
+      ['https://feria.cl/', 'https://feria.cl'],
+      ['http://localhost:4000', 'http://localhost:4000'],
+    ] as const) {
+      process.env.URL_PUBLICA = entrada;
+      const { CONFIG } = await import(`../src/config.ts?v=${encodeURIComponent(entrada)}`);
+      assert.equal(CONFIG.urlPublica, esperada, entrada);
+    }
+  } finally {
+    process.env = previo;
+  }
+});

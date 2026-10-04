@@ -1,0 +1,105 @@
+# Despliegue del backend de la feria.
+#
+# Render lee este archivo y arma todo solo: el servidor y la base
+# de datos, con las variables conectadas entre sí.
+#
+#   render.com  >  New  >  Blueprint  >  elegir este repositorio
+#
+# Lo único que hay que completar a mano después son los secretos
+# marcados con `sync: false`: Mercado Pago y, si se usa, Twilio.
+#
+# ---------------------------------------------------------------
+# Por qué NO está el plan gratuito
+# ---------------------------------------------------------------
+# El plan `free` de Render apaga el servidor cuando nadie lo usa y
+# lo despierta con la primera visita, que tarda cerca de un minuto.
+# Para un sitio común es un detalle; acá rompe el producto:
+#
+#   · Las ofertas a los feriantes vencen a los 90 segundos. Eso lo
+#     cuenta un reloj DENTRO del servidor. Dormido, no corre: el
+#     pedido se queda esperando para siempre en el primer puesto.
+#   · El WebSocket que mantiene las pantallas al día se corta.
+#   · El primer cliente del día espera un minuto para ver el
+#     catálogo, y se va.
+#
+# `starter` cuesta unos USD 7 al mes por servicio. Con el margen de
+# un día y medio de feria se paga el mes entero.
+
+databases:
+  - name: feria-base
+    databaseName: feria
+    user: feria
+    plan: basic-256mb
+    # Valparaíso no tiene región propia; Oregón es de las más
+    # cercanas en latencia desde Chile dentro de Render.
+    region: oregon
+
+services:
+  - type: web
+    name: feria-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter
+    region: oregon
+    healthCheckPath: /salud
+    # El disco guarda las fotos que sube el operador desde el panel.
+    # Las de referencia del catálogo NO van acá: viajan dentro de la
+    # imagen. Sin este disco, cada despliegue borra las subidas.
+    disk:
+      name: feria-datos
+      mountPath: /datos
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: feria-base
+          property: connectionString
+      - key: FERIA_DATOS
+        value: /datos
+      # Firma los códigos de acceso y los tokens de sesión. Render
+      # genera uno al azar y no lo muestra. Si cambia, todas las
+      # sesiones abiertas dejan de valer.
+      - key: FERIA_SECRETO
+        generateValue: true
+      - key: TZ_FERIA
+        value: America/Santiago
+      - key: CIUDAD
+        value: "Valparaíso, Chile"
+      - key: PAIS_ISO
+        value: cl
+      - key: PASARELA
+        value: mercadopago
+      # Comisión real de Mercado Pago Checkout Pro al instante:
+      # 3,19% + IVA. A 10 días es 0.0344. De esto sale el «te queda»
+      # del panel, así que conviene que sea el número verdadero.
+      - key: TASA_COMISIONES
+        value: "0.038"
+      - key: LIMITE_POR_MINUTO
+        value: "120"
+      # La dirección pública del propio servicio: Mercado Pago la
+      # usa para avisar de los pagos.
+      - key: URL_PUBLICA
+        fromService:
+          name: feria-backend
+          type: web
+          property: host
+      # ---- A completar en el panel de Render ----
+      # El Access Token de producción de Mercado Pago.
+      - key: MP_ACCESS_TOKEN
+        sync: false
+      # El teléfono con el que entra el operador.
+      - key: OPERADOR_TELEFONO
+        sync: false
+      - key: TELEFONO_CONTACTO
+        sync: false
+      # Opcionales: sin ellos los códigos de acceso no se mandan por
+      # SMS y el operador los pasa desde el panel.
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM
+        sync: false

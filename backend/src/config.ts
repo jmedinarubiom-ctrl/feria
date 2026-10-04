@@ -9,6 +9,12 @@ import { fileURLToPath } from 'node:url';
  * una larga deja al cliente esperando. Ajustalos con datos reales
  * de la tabla `ofertas`, no por intuición.
  */
+function normalizarUrl(valor: string | undefined): string | undefined {
+  const v = valor?.trim().replace(/\/+$/, '');
+  if (!v) return undefined;
+  return /^https?:\/\//.test(v) ? v : `https://${v}`;
+}
+
 export const CONFIG = {
   /**
    * Cascada de rondas. Si nadie acepta en una ronda, se pasa a la
@@ -127,6 +133,16 @@ export const CONFIG = {
 
   /** A dónde llama el cliente que necesita cambiar o cancelar un pedido. */
   telefonoContacto: process.env.TELEFONO_CONTACTO ?? '+56 9 0000 0009',
+
+  /**
+   * La dirección pública del servidor, siempre con esquema.
+   *
+   * Render entrega el host pelado («feria.onrender.com») y Mercado
+   * Pago necesita la URL completa. Sin normalizar esto, el webhook
+   * queda apuntando a una dirección inválida y los pagos no se
+   * confirman solos — un error que solo aparece en producción.
+   */
+  urlPublica: normalizarUrl(process.env.URL_PUBLICA),
 
   /** Dónde buscar las direcciones que escribe el cliente. */
   ciudad: process.env.CIUDAD ?? 'Valparaíso, Chile',

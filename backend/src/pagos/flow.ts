@@ -1,5 +1,7 @@
 import { createHmac } from 'node:crypto';
 
+import { CONFIG } from '../config.ts';
+
 import type {
   CobroCreado, DatosCobro, DatosReembolso, EstadoCobro, Pasarela, ReembolsoCreado,
 } from './pasarela.ts';
@@ -29,14 +31,15 @@ export type ConfigFlow = {
 };
 
 export function configDesdeEntorno(): ConfigFlow | null {
-  const { FLOW_API_KEY, FLOW_SECRET_KEY, FLOW_BASE, URL_PUBLICA } = process.env;
-  if (!FLOW_API_KEY || !FLOW_SECRET_KEY || !URL_PUBLICA) return null;
+  const { FLOW_API_KEY, FLOW_SECRET_KEY, FLOW_BASE } = process.env;
+  const publica = CONFIG.urlPublica;
+  if (!FLOW_API_KEY || !FLOW_SECRET_KEY || !publica) return null;
   return {
     apiKey: FLOW_API_KEY,
     secretKey: FLOW_SECRET_KEY,
     base: FLOW_BASE ?? 'https://www.flow.cl/api',
-    urlConfirmacion: `${URL_PUBLICA}/webhooks/flow/confirmacion`,
-    urlRetorno: `${URL_PUBLICA}/pagos/retorno`,
+    urlConfirmacion: `${publica}/webhooks/flow/confirmacion`,
+    urlRetorno: `${publica}/pagos/retorno`,
   };
 }
 
