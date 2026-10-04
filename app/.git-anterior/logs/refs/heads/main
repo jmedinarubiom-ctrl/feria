@@ -1,0 +1,4 @@
+0000000000000000000000000000000000000000 e3454cc6f5a4082de34e839dd398be43d4c308ae jmedinarubiom-ctrl <jmedinarubiom@gmail.com> 1787844595 -0700	commit (initial): Initial commit
+e3454cc6f5a4082de34e839dd398be43d4c308ae bef060f0629788afb48c1175d5430a822627f781 jmedinarubiom-ctrl <jmedinarubiom@gmail.com> 1791069768 -0300	commit: Mercado Pago, fotos de referencia, geocodificación y panel
+bef060f0629788afb48c1175d5430a822627f781 89e50c5bacba137f4593c12a6a641b84286c3add jmedinarubiom-ctrl <jmedinarubiom@gmail.com> 1791069796 -0300	commit: Perfiles de build para Android
+89e50c5bacba137f4593c12a6a641b84286c3add 4a135536b3d52b481475a3cec39d8fab16c26eaa jmedinarubiom-ctrl <jmedinarubiom@gmail.com> 1791071422 -0300	commit: La dirección del servidor se puede cambiar desde la app

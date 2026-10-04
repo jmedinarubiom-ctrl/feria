@@ -1,0 +1,22 @@
+{
+  "cli": { "version": ">= 16.0.0", "appVersionSource": "remote" },
+  "build": {
+    "apk": {
+      "android": { "buildType": "apk" },
+      "distribution": "internal",
+      "channel": "apk",
+      "env": { "EXPO_PUBLIC_FERIA_API": "http://192.168.1.26:4000" }
+    },
+    "desarrollo": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": { "buildType": "apk" },
+      "env": { "EXPO_PUBLIC_FERIA_API": "http://192.168.1.26:4000" }
+    },
+    "produccion": {
+      "autoIncrement": true,
+      "channel": "produccion"
+    }
+  },
+  "submit": { "produccion": {} }
+}

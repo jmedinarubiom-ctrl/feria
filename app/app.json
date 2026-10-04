@@ -1,0 +1,82 @@
+{
+  "expo": {
+    "name": "Feria",
+    "slug": "feria",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "cl.feria.app",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png",
+        "backgroundColor": "#FAFBFC"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "cl.feria.app",
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "usesCleartextTraffic": true
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "color": "#8B2838"
+        }
+      ],
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 190,
+          "resizeMode": "contain",
+          "backgroundColor": "#FAFBFC"
+        }
+      ],
+      "expo-asset",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Feria usa tu ubicación mientras llevás un pedido, para que el cliente y la operación sepan por dónde vas."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Feria necesita tus fotos para cargar la imagen de un producto del catálogo.",
+          "cameraPermission": "Feria usa la cámara para sacarle la foto a un producto del catálogo."
+        }
+      ]
+    ],
+    "scheme": "feria",
+    "notification": {
+      "iosDisplayInForeground": true,
+      "androidMode": "default"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "6d9f6a3e-9158-4aae-9365-d6f971d809d6"
+      }
+    },
+    "backgroundColor": "#FAFBFC",
+    "owner": "jmedinar"
+  }
+}

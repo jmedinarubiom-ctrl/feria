@@ -1,0 +1,8 @@
+La dirección del servidor se puede cambiar desde la app
+
+Un APK de prueba queda atado a la IP con la que se compiló. Si el
+teléfono no está en esa red, la app no llega a ninguna parte y el
+error no dice a dónde intentó. Ahora la dirección se ve en el
+ingreso, se puede corregir tocándola, y queda guardada.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
