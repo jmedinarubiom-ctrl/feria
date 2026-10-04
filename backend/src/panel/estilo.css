@@ -1,0 +1,227 @@
+/*
+ * Panel de administración.
+ *
+ * La misma paleta y la misma tipografía que la app: quien usa las
+ * dos no tiene que aprender dos productos. Lo que cambia es la
+ * densidad — acá hay pantalla y teclado, así que las cosas se
+ * muestran en tabla y no de a una tarjeta por dedo.
+ */
+
+:root {
+  --verde: #146C54;
+  --verde-oscuro: #0C5C44;
+  --verde-suave: #E4ECDC;
+  --marca: #8B2838;
+  --ambar: #F4B424;
+
+  --fondo: #F4F6F4;
+  --superficie: #FFFFFF;
+  --superficie-alta: #F0F2F0;
+  --borde: #E4E7E4;
+  --linea: #EDEFED;
+
+  --texto: #16211D;
+  --texto-suave: #6B7670;
+
+  --rojo: #C23B3B;
+  --rojo-suave: #FBEEEE;
+  --naranja: #C2701B;
+  --naranja-suave: #FCF2E8;
+  --azul: #3B7FBF;
+
+  --r-chico: 10px;
+  --r-medio: 14px;
+  --r-grande: 18px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  /* Una tabla ancha no debe estirar la página: si lo hace, todo lo
+     que esté posicionado contra el borde derecho —el panel lateral—
+     queda fuera de la pantalla. La tabla scrollea dentro de su
+     tarjeta, que es donde el scroll tiene sentido. */
+  overflow-x: hidden;
+  background: var(--fondo);
+  color: var(--texto);
+  font-family: Nunito, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+h1, h2, h3, .cifra { font-family: Fredoka, Nunito, system-ui, sans-serif; font-weight: 600; }
+h1 { font-size: 26px; margin: 0; letter-spacing: -0.4px; }
+h2 { font-size: 19px; margin: 0 0 14px; }
+h3 { font-size: 16px; margin: 0; }
+
+a { color: var(--verde-oscuro); }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+
+/* ---------- Estructura ---------- */
+
+.barra {
+  display: flex; align-items: center; gap: 16px;
+  padding: 12px 24px;
+  background: var(--superficie);
+  border-bottom: 1px solid var(--borde);
+  position: sticky; top: 0; z-index: 10;
+}
+.barra .marca { display: flex; align-items: center; gap: 10px; font-family: Fredoka, sans-serif;
+                font-size: 18px; font-weight: 600; }
+.barra .marca img { width: 30px; height: 30px; }
+.barra .crece { flex: 1; }
+.barra .quien { color: var(--texto-suave); font-size: 13px; text-align: right; }
+
+nav { display: flex; gap: 8px; padding: 16px 24px 0; flex-wrap: wrap; }
+nav button {
+  padding: 8px 18px; border-radius: 999px;
+  border: 1px solid var(--borde); background: var(--superficie);
+  color: var(--texto-suave); font: inherit; font-weight: 700; font-size: 13px;
+  cursor: pointer;
+}
+nav button:hover { border-color: var(--verde); color: var(--verde-oscuro); }
+nav button[aria-current='page'] {
+  background: var(--verde); border-color: var(--verde); color: #fff;
+}
+
+main { padding: 20px 24px 60px; max-width: 1280px; }
+
+/* ---------- Piezas ---------- */
+
+.tarjeta {
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: var(--r-grande);
+  padding: 18px;
+}
+.grilla { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.pila { display: grid; gap: 18px; }
+.fila { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+.rotulo {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.7px;
+  text-transform: uppercase; color: var(--texto-suave);
+}
+.cifra { font-size: 28px; letter-spacing: -0.5px; font-variant-numeric: tabular-nums; }
+.suave { color: var(--texto-suave); font-size: 13px; }
+.num { font-variant-numeric: tabular-nums; text-align: right; }
+
+/* El contenedor que scrollea cuando la tabla no entra. */
+.tabla { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left; padding: 10px 12px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.7px;
+  text-transform: uppercase; color: var(--texto-suave);
+  border-bottom: 1px solid var(--borde); white-space: nowrap;
+}
+th.num, td.num { text-align: right; }
+td { padding: 11px 12px; border-bottom: 1px solid var(--linea); vertical-align: middle; }
+tr:last-child td { border-bottom: 0; }
+tbody tr.clicable:hover { background: var(--superficie-alta); cursor: pointer; }
+
+.chip {
+  display: inline-block; padding: 3px 10px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; white-space: nowrap;
+  background: var(--superficie-alta); color: var(--texto-suave);
+}
+.chip.exito { background: var(--verde-suave); color: var(--verde-oscuro); }
+.chip.aviso { background: var(--naranja-suave); color: var(--naranja); }
+.chip.alerta { background: var(--rojo-suave); color: var(--rojo); }
+.chip.info { background: #E8F0F8; color: var(--azul); }
+.chip.marca { background: #F6E8EA; color: var(--marca); }
+
+button.accion {
+  padding: 9px 16px; border-radius: var(--r-chico); border: 0;
+  background: var(--verde); color: #fff; font: inherit; font-weight: 700; font-size: 13px;
+  cursor: pointer;
+}
+button.accion:hover { background: var(--verde-oscuro); }
+button.accion:disabled { background: var(--superficie-alta); color: var(--texto-suave); cursor: default; }
+button.accion.secundario { background: var(--superficie); color: var(--texto); border: 1px solid var(--borde); }
+button.accion.secundario:hover { background: var(--superficie-alta); }
+button.accion.peligro { background: var(--rojo); }
+button.accion.peligro:hover { background: #A33030; }
+
+input, select, textarea {
+  padding: 9px 12px; border-radius: var(--r-chico);
+  border: 1px solid var(--borde); background: var(--superficie);
+  font: inherit; font-size: 14px; color: var(--texto);
+}
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--verde); outline-offset: -1px; }
+input.num { text-align: right; width: 92px; font-variant-numeric: tabular-nums; }
+input.ancho { width: 100%; }
+label { display: grid; gap: 4px; }
+
+.miniatura {
+  width: 42px; height: 42px; border-radius: var(--r-chico);
+  object-fit: cover; background: var(--verde-suave);
+  display: grid; place-items: center; font-size: 20px;
+}
+
+.aviso {
+  padding: 11px 14px; border-radius: var(--r-chico);
+  background: var(--naranja-suave); color: var(--naranja); font-size: 13px;
+}
+.aviso.alerta { background: var(--rojo-suave); color: var(--rojo); }
+.aviso.exito { background: var(--verde-suave); color: var(--verde-oscuro); }
+
+.vacio { padding: 40px; text-align: center; color: var(--texto-suave); }
+
+/* ---------- Ingreso ---------- */
+
+.ingreso {
+  min-height: 100vh; display: grid; place-items: center; padding: 24px;
+}
+.ingreso .caja { width: 100%; max-width: 380px; display: grid; gap: 14px; text-align: center; }
+.ingreso img { width: 110px; margin: 0 auto; }
+.ingreso input { text-align: center; font-size: 18px; }
+
+/* ---------- Detalle lateral ---------- */
+
+.telon {
+  position: fixed; inset: 0; background: rgba(22, 33, 29, 0.35); z-index: 20;
+}
+.panel-lateral {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: min(520px, 100vw); overflow-y: auto; overflow-x: hidden;
+  background: var(--fondo); padding: 20px 22px 60px;
+  display: grid; gap: 16px; align-content: start;
+  box-shadow: -8px 0 32px rgba(22, 33, 29, .14);
+}
+/*
+ * Un hijo de grid no baja de su ancho mínimo salvo que se le diga.
+ * El detalle de un evento es un JSON sin espacios, o sea una sola
+ * palabra larguísima: sin esto estira la tarjeta, la tarjeta estira
+ * el panel y los montos de la derecha terminan fuera de la pantalla.
+ */
+.panel-lateral > * { min-width: 0; }
+.panel-lateral table { table-layout: fixed; }
+.panel-lateral td { overflow-wrap: anywhere; }
+.panel-lateral code { overflow-wrap: anywhere; }
+.panel-lateral .cerrar {
+  justify-self: end; border: 0; background: none; font-size: 24px;
+  cursor: pointer; color: var(--texto-suave); line-height: 1;
+}
+
+.bitacora { display: grid; gap: 0; }
+.bitacora .hito {
+  display: grid; grid-template-columns: 14px 1fr; gap: 12px;
+  padding-bottom: 14px; position: relative;
+}
+.bitacora .hito::before {
+  content: ''; position: absolute; left: 6px; top: 14px; bottom: 0;
+  width: 2px; background: var(--borde);
+}
+.bitacora .hito:last-child::before { display: none; }
+.bitacora .punto {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--verde); margin-top: 4px; z-index: 1;
+}
+
+@media (max-width: 720px) {
+  main, nav, .barra { padding-left: 14px; padding-right: 14px; }
+  table { font-size: 13px; }
+  th, td { padding: 8px 7px; }
+}

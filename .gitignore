@@ -1,0 +1,15 @@
+# Secretos: nunca al repositorio.
+.env
+.env.*
+!.env.example
+
+# Datos locales: la base y las fotos que sube el operador. Se
+# respaldan con ./respaldar.sh, no con git.
+backend/datos/
+respaldos/
+
+node_modules/
+dist/
+.expo/
+*.log
+.DS_Store
