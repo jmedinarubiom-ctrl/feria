@@ -3,30 +3,21 @@ import assert from 'node:assert/strict';
 
 import { abrirDB, cerrarDB, consultar, consultarUno, ejecutar, type Fila } from '../src/db/index.ts';
 import { FERIA_ID } from '../src/db/semilla.ts';
-import { limpiarYSembrar, pedidoPagado } from './ayuda.ts';
+import { limpiarYSembrar, pasarelaDeMentira, pedidoPagado } from './ayuda.ts';
 import { crearPedido, aceptarOferta, marcarListo } from '../src/dominio/despacho.ts';
 import { aceptarViaje, completarParada } from '../src/dominio/reparto.ts';
 import { cancelarPedido, reembolsosPendientes, ErrorCancelacion } from '../src/dominio/cancelacion.ts';
 import { calcularLiquidacion, liquidacionesDelDia } from '../src/dominio/liquidaciones.ts';
 import { metricas } from '../src/dominio/consultas.ts';
 import { iniciarPago, confirmarEnDesarrollo, fijarPasarela } from '../src/dominio/pagos.ts';
-import { crearPasarelaFlow } from '../src/pagos/flow.ts';
-import { fijarTransporteFlow, restaurarTransporteFlow } from '../src/pagos/flow.ts';
 
 before(async () => {
   await abrirDB({ memoria: true });
-  // Ningún test sale a internet: sin esto llegaban al sandbox real
-  // de Flow y fallaban por credenciales.
-  fijarTransporteFlow(async (url) => {
-    if (url.includes('/payment/create')) {
-      return { url: 'https://sandbox.flow.cl/pay', token: 'tok', flowOrder: 1 };
-    }
-    throw new Error('Flow no responde');
-  });
+  // Ningún test sale a internet.
+  fijarPasarela(null);
 });
 
 after(async () => {
-  restaurarTransporteFlow();
   fijarPasarela(null);
   await cerrarDB();
 });
@@ -226,18 +217,14 @@ test('la liquidación del operador lista lo que hay que compensar', async () => 
 });
 
 test('si el reembolso falla, la cancelación igual ocurre', async () => {
-  fijarPasarela(crearPasarelaFlow({
-    apiKey: 'x', secretKey: 'y', base: 'https://sandbox.flow.cl/api',
-    urlConfirmacion: 'https://feria.cl/c', urlRetorno: 'https://feria.cl/r',
-  }));
+  const falsa = pasarelaDeMentira();
+  falsa.caida = true;
+  fijarPasarela(falsa);
   const { pedidoId } = await crearPedido(base(CARRO));
   const { pagoId } = await iniciarPago(pedidoId, 'c@c.cl');
   await confirmarEnDesarrollo(pagoId);
-  // Se marca como pago de Flow para que el reembolso salga por la
-  // pasarela… que no va a responder.
-  await ejecutar(`UPDATE pagos SET proveedor = 'flow' WHERE id = ?`, pagoId);
 
-  // Flow no responde (no hay transporte de prueba puesto acá).
+  // El reembolso sale por la pasarela… que no responde.
   const r = await cancelarPedido({ pedidoId, motivo: 'me arrepentí' });
 
   // Lo importante: nadie sigue preparando un pedido cancelado.
@@ -246,6 +233,6 @@ test('si el reembolso falla, la cancelación igual ocurre', async () => {
   assert.equal(r.reembolso.solicitado, false, 'y queda anotado que hay que devolver a mano');
 
   const pendientes = await reembolsosPendientes();
-  assert.ok(pendientes.length >= 0);
+  assert.equal(pendientes.length, 1, 'aparece en la lista del panel');
   fijarPasarela(null);
 });

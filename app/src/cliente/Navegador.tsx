@@ -113,9 +113,11 @@ function Pestanas({ onSalir }: { onSalir: () => void }) {
   );
 }
 
-export default function AppCliente({ onSalir }: { onSalir: () => void }) {
+export default function AppCliente({ onSalir, telefono }: {
+  onSalir: () => void; telefono: string;
+}) {
   return (
-    <ProveedorCliente>
+    <ProveedorCliente telefono={telefono}>
       <NavigationContainer>
         {/* Arriba, una sola vez para toda la app: sin esto el saludo
             queda debajo del reloj. Abajo lo resuelve cada pantalla,

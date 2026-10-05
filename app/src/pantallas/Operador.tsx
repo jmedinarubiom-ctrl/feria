@@ -50,7 +50,10 @@ function Hoy() {
   const [ocupado, setOcupado] = useState(false);
 
   if (cargando) return <Cargando />;
-  if (error) return <Pantalla><Aviso texto={error} /></Pantalla>;
+  // Con datos en pantalla, una recarga que falla —la señal de la
+  // feria— no los tapa con un error: se sigue mostrando lo último.
+  if (error && !datos) return <Pantalla><Aviso texto={error} /></Pantalla>;
+  if (!datos) return <Cargando />;
 
   const { autogestion, metricas, liquidaciones, activos } = datos;
 

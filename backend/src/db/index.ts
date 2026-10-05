@@ -85,12 +85,30 @@ async function motorPostgres(url: string): Promise<Motor> {
       : { rejectUnauthorized: false },
     max: Number(process.env.PG_POOL_MAX ?? 10),
     idleTimeoutMillis: 30_000,
+    // Sin esto, con la base caída cada petición espera para siempre
+    // una conexión que no llega y el servidor parece colgado.
+    connectionTimeoutMillis: 10_000,
+    // Las bases administradas cortan las conexiones quietas desde su
+    // lado; el keepalive evita enterarse recién al usarlas.
+    keepAlive: true,
   });
+
+  // Una conexión en reposo que la base corta emite 'error' en el
+  // pool. Sin nadie escuchando, Node lo trata como excepción sin
+  // atrapar y termina el proceso: la feria entera se caía porque la
+  // base reinició una conexión que nadie estaba usando. El pool la
+  // descarta solo; acá alcanza con anotarlo.
+  pool.on('error', (e) => console.error('[postgres] conexión en reposo perdida:', e.message));
 
   return {
     nombre: 'postgres',
     async tomar() {
       const c = await pool.connect();
+      // Lo mismo para una conexión tomada: si se corta entre dos
+      // consultas de una transacción, el error llega por evento.
+      let rota: Error | undefined;
+      const alRomperse = (e: Error) => { rota = e; };
+      c.on('error', alRomperse);
       return {
         async consulta(sql, params) {
           const r = await c.query(sql, params);
@@ -99,7 +117,11 @@ async function motorPostgres(url: string): Promise<Motor> {
         async script(sql) {
           await c.query(sql);
         },
-        liberar: () => c.release(),
+        liberar: () => {
+          c.removeListener('error', alRomperse);
+          // Con el error, el pool la destruye en vez de reusarla.
+          c.release(rota);
+        },
       };
     },
     cerrar: () => pool.end(),

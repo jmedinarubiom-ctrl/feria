@@ -71,19 +71,22 @@ export default function Pago({
         },
       });
 
+      // Se anota apenas existe. Antes se anotaba recién al volver
+      // del pago: si la app se cerraba en el medio, el cliente
+      // pagaba y el pedido no aparecía en «Mis pedidos».
+      await registrarPedido(pedido.pedidoId);
+
       const pago = await api('POST', '/pagos/iniciar', {
         cuerpo: { pedidoId: pedido.pedidoId, email: borrador.email.trim() || undefined },
       });
 
-      if (pago.url) await WebBrowser.openBrowserAsync(pago.url);
-      else if (pago.pagoId) await api('POST', `/dev/pagar/${pago.pagoId}`);
+      await abrirPago(pago);
 
       const listo = await esperarConfirmacion(pedido.pedidoId, pago.pagoId);
       if (!listo) {
         Alert.alert('Pago sin confirmar',
           'Si ya pagaste, tu pedido va a aparecer en unos segundos.');
       }
-      await registrarPedido(pedido.pedidoId);
       vaciar();
       navegar('Seguimiento', { pedidoId: pedido.pedidoId });
     } catch (err: any) {
@@ -147,7 +150,7 @@ export default function Pago({
             <Text style={{ fontSize: 22 }}>💳</Text>
             <View style={{ flex: 1 }}>
               <Text style={T.destacado}>Tarjeta o transferencia</Text>
-              <Text style={T.micro}>Pagás en la página segura de la pasarela</Text>
+              <Text style={T.micro}>Pagas en la página segura de la pasarela</Text>
             </View>
           </View>
         </View>
@@ -187,6 +190,22 @@ export default function Pago({
       </View>
     </View>
   );
+}
+
+/**
+ * Manda al cliente a pagar y espera a que vuelva.
+ *
+ * `openAuthSessionAsync` y no `openBrowserAsync`: el segundo, en
+ * Android, devuelve apenas se abre el navegador. La app empezaba a
+ * contar los 12 segundos de espera con el cliente todavía
+ * escribiendo la tarjeta, y le mostraba «pago sin confirmar» encima
+ * del checkout. Este espera a que la página de retorno del servidor
+ * lo traiga de vuelta por `feria://pago`, o a que cierre el navegador.
+ */
+export async function abrirPago(pago: { url?: string | null; pagoId?: string }): Promise<void> {
+  if (pago.url) await WebBrowser.openAuthSessionAsync(pago.url, 'feria://pago');
+  // Sin pasarela configurada (desarrollo) se confirma directo.
+  else if (pago.pagoId) await api('POST', `/dev/pagar/${pago.pagoId}`);
 }
 
 /**

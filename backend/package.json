@@ -10,6 +10,7 @@
     "start": "node --env-file-if-exists=.env src/servidor.ts",
     "dev": "node --env-file-if-exists=.env --watch src/servidor.ts",
     "test": "FERIA_SIN_GEO=1 node --test test/*.test.ts",
+    "test:postgres": "FERIA_SIN_GEO=1 node --test --test-concurrency=1 test/*.test.ts",
     "demo": "node --env-file-if-exists=.env src/demo.ts",
     "migrar": "node -e \"import('./src/db/index.ts').then(async m => { await m.abrirDB(); console.log('esquema aplicado en', m.nombreMotor()); await m.cerrarDB(); })\"",
     "reset": "rm -rf datos && echo 'base local borrada, se resiembra al arrancar'",

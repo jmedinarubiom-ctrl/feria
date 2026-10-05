@@ -10,7 +10,7 @@ import type {
  * Pago y vuelve. Nunca pasa un número de tarjeta por acá, así que
  * el sistema queda fuera del alcance de PCI.
  *
- * La diferencia importante con Flow: acá hay DOS identificadores.
+ * Lo que hay que tener presente: acá hay DOS identificadores.
  * Primero se crea una «preferencia» (el checkout), y recién cuando
  * alguien paga nace un «payment» con otro id. El webhook avisa del
  * segundo, y el reembolso va contra el segundo. El hilo entre los

@@ -26,10 +26,22 @@ const AGENTE = 'FeriaApp/1.0 (reparto de feria libre; contacto@feria.cl)';
 
 /** Nominatim pide máximo una consulta por segundo. */
 let ultima = 0;
-async function esperarTurno(): Promise<void> {
-  const falta = 1100 - (Date.now() - ultima);
-  if (falta > 0) await new Promise((r) => setTimeout(r, falta));
-  ultima = Date.now();
+let cola: Promise<void> = Promise.resolve();
+
+/**
+ * Los turnos se encadenan. Antes cada llamada miraba `ultima` por
+ * su cuenta: dos pedidos entrando juntos calculaban la misma espera
+ * y salían los dos a la vez, que es justo lo que Nominatim pide no
+ * hacer (y por lo que bloquea).
+ */
+function esperarTurno(): Promise<void> {
+  const turno = cola.then(async () => {
+    const falta = 1100 - (Date.now() - ultima);
+    if (falta > 0) await new Promise((r) => setTimeout(r, falta));
+    ultima = Date.now();
+  });
+  cola = turno;
+  return turno;
 }
 
 /** Lo que se guarda para no volver a preguntar lo mismo. */

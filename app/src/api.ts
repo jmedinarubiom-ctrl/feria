@@ -115,11 +115,14 @@ export async function api(
 
 // ---------- Ingreso ----------
 
-export const pedirCodigo = (telefono: string) =>
-  api('POST', '/auth/codigo', { cuerpo: { telefono }, sinSesion: true });
+/** A dónde va el código: al teléfono por SMS, o al correo. */
+export type Destino = { telefono: string } | { correo: string };
 
-export const canjearCodigo = (telefono: string, codigo: string, dispositivo: string) =>
-  api('POST', '/auth/sesion', { cuerpo: { telefono, codigo, dispositivo }, sinSesion: true });
+export const pedirCodigo = (destino: Destino) =>
+  api('POST', '/auth/codigo', { cuerpo: destino, sinSesion: true });
+
+export const canjearCodigo = (destino: Destino, codigo: string, dispositivo: string) =>
+  api('POST', '/auth/sesion', { cuerpo: { ...destino, codigo, dispositivo }, sinSesion: true });
 
 /**
  * Carga un endpoint y lo vuelve a pedir cuando el WebSocket avisa
@@ -155,7 +158,13 @@ export function useTablero(camino: string, rol: string, actorId: string) {
     const conectar = () => {
       if (!vivo) return;
       const wsBase = servidor().replace(/^http/, 'ws') + '/ws';
-      ws = new WebSocket(`${wsBase}?rol=${rol}&id=${encodeURIComponent(actorId)}`);
+      // El servidor ya no le cree a la URL quién es uno: feriante,
+      // repartidor y operador se identifican con el token de su
+      // sesión. El cliente no tiene sesión; su llave es el id de su
+      // pedido.
+      const sesion = rol !== 'cliente' && tokenActual
+        ? `&token=${encodeURIComponent(tokenActual)}` : '';
+      ws = new WebSocket(`${wsBase}?rol=${rol}&id=${encodeURIComponent(actorId)}${sesion}`);
       ws.onopen = () => { enVivoRef.current = true; setEnVivo(true); void recargar(); };
       ws.onmessage = () => { void recargar(); };
       ws.onerror = () => {};

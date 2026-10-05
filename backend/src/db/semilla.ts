@@ -71,7 +71,14 @@ export async function sembrar(): Promise<void> {
        VALUES (?, ?, ?, ?, ?, ?, true)`,
       id, rubro, nombre, formato, venta, costo);
   }
-  for (const [id, nombre, puesto, telefono, rubros, lat, lng] of FERIANTES) {
+  // La gente de ejemplo es para desarrollo. En producción quedaban
+  // ocho feriantes inventados y «conectados»: cada pedido real se
+  // les ofrecía a ellos primero y esperaba tres minutos y medio a
+  // que contestara alguien que no existe. Y sus teléfonos de mentira
+  // tienen formato de número real: quien tuviera uno podía entrar
+  // como ese feriante. Los de verdad se cargan en el panel (Gente).
+  const conGenteDeEjemplo = process.env.NODE_ENV !== 'production';
+  for (const [id, nombre, puesto, telefono, rubros, lat, lng] of conGenteDeEjemplo ? FERIANTES : []) {
     await ejecutar(
       `INSERT INTO feriantes (id, nombre, puesto, feria_id, telefono, conectado, lat, lng)
        VALUES (?, ?, ?, ?, ?, true, ?, ?)`,
@@ -80,7 +87,7 @@ export async function sembrar(): Promise<void> {
       await ejecutar('INSERT INTO feriante_rubros (feriante_id, rubro_id) VALUES (?, ?)', id, r);
     }
   }
-  for (const [id, nombre, vehiculo, telefono] of REPARTIDORES) {
+  for (const [id, nombre, vehiculo, telefono] of conGenteDeEjemplo ? REPARTIDORES : []) {
     await ejecutar(
       `INSERT INTO repartidores (id, nombre, vehiculo, telefono, conectado)
        VALUES (?, ?, ?, ?, true)`,

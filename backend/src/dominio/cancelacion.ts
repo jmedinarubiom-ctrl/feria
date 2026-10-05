@@ -78,7 +78,12 @@ export async function cancelarPedido(datos: Cancelacion): Promise<ResultadoCance
 
     for (const s of subs) {
       const habiaAceptado = s.feriante_id
-        && [EstadoSubPedido.ACEPTADO, EstadoSubPedido.LISTO].includes(s.estado);
+        // RETIRADO también: el repartidor ya se llevó la mercadería
+        // del puesto. Antes un pedido cancelado en ruta sacaba ese
+        // sub-pedido de la liquidación y el feriante no cobraba lo
+        // que ya había entregado.
+        && [EstadoSubPedido.ACEPTADO, EstadoSubPedido.LISTO, EstadoSubPedido.RETIRADO]
+          .includes(s.estado);
 
       await ejecutar(
         'UPDATE sub_pedidos SET estado = ?, compensado = ? WHERE id = ?',
@@ -169,9 +174,9 @@ async function pedirReembolso(pedido: Fila, monto: number | undefined, motivo: s
   }
 
   const via = pasarela();
-  // La pasarela que cobró tiene que ser la que devuelve: un pago
-  // hecho con Flow no se reembolsa desde Mercado Pago, y si el
-  // proveedor cambió en el medio hay que resolverlo a mano.
+  // La pasarela que cobró tiene que ser la que devuelve. Un pago
+  // anotado con otro proveedor (los de desarrollo, sin pasarela) no
+  // se reembolsa por Mercado Pago.
   if (!via || pago.proveedor !== via.nombre) {
     // Sin pasarela real (desarrollo) se anota igual, para que la
     // contabilidad del día cuadre.
@@ -207,6 +212,42 @@ async function pedirReembolso(pedido: Fila, monto: number | undefined, motivo: s
       { monto: aDevolver, error: String(e), motivo });
     return { monto: aDevolver, solicitado: false, motivo: String(e) };
   }
+}
+
+/**
+ * Vuelve a pedirle la devolución a la pasarela.
+ *
+ * Para los que fallaron al cancelar —la pasarela no respondió— y
+ * para los pagos que llegaron después de cancelado el pedido.
+ */
+export async function reintentarReembolso(pagoId: string) {
+  const pago = await pagoPorDevolver(pagoId);
+  const pedido = await consultarUno<Fila>('SELECT * FROM pedidos WHERE id = ?', pago.pedido_id);
+  return pedirReembolso(pedido!, undefined, 'reintento desde el panel');
+}
+
+/**
+ * El operador devolvió la plata por fuera (desde la página de la
+ * pasarela, o en efectivo). Sin esto la lista de pendientes no se
+ * vaciaba nunca y dejaba de servir para lo que es: no olvidarse.
+ */
+export async function anotarReembolsoManual(pagoId: string, operadorId: string) {
+  const pago = await pagoPorDevolver(pagoId);
+  await ejecutar(
+    'UPDATE pagos SET monto_reembolsado = ?, reembolsado_at = ? WHERE id = ?',
+    pago.monto, ahora(), pago.id);
+  await registrarEvento('pago', pago.id, 'reembolso anotado a mano',
+    { monto: pago.monto, operadorId });
+  return { monto: pago.monto };
+}
+
+async function pagoPorDevolver(pagoId: string): Promise<Fila> {
+  const pago = await consultarUno<Fila>(
+    `SELECT g.* FROM pagos g JOIN pedidos p ON p.id = g.pedido_id
+      WHERE g.id = ? AND g.estado = 'PAGADO' AND p.estado = 'CANCELADO'`, pagoId);
+  if (!pago) throw new ErrorCancelacion(404, 'Ese pago no está pendiente de devolución.');
+  if (pago.monto_reembolsado > 0) throw new ErrorCancelacion(409, 'Ya estaba devuelto.');
+  return pago;
 }
 
 /** Reembolsos que quedaron pendientes y hay que resolver a mano. */

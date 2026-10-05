@@ -116,7 +116,6 @@ export type CambioProducto = {
   precioCosto?: number;
   activo?: boolean;
   imagenUrl?: string | null;
-  shopifyVariantId?: string | null;
 };
 
 /**
@@ -143,11 +142,10 @@ export async function actualizarProducto(id: string, cambio: CambioProducto) {
   await ejecutar(
     `UPDATE productos
         SET nombre = ?, formato = ?, precio_venta = ?, precio_costo = ?,
-            activo = ?, imagen_url = ?, shopify_variant_id = ?
+            activo = ?, imagen_url = ?
       WHERE id = ?`,
     nombre, formato, venta, costo, activo,
     cambio.imagenUrl !== undefined ? validarImagen(cambio.imagenUrl) : actual.imagen_url,
-    cambio.shopifyVariantId !== undefined ? cambio.shopifyVariantId : actual.shopify_variant_id,
     id);
 
   // Los cambios de precio quedan registrados: al mes siguiente uno

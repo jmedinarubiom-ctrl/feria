@@ -36,7 +36,10 @@ export function leRegistra(s: Suscripcion, m: Mensaje): boolean {
       return s.rol === 'operador' || (s.rol === 'cliente' && s.id === m.pedidoId);
 
     case 'ubicacion':
-      return s.rol === 'operador' || s.rol === 'cliente';
+      // Solo al cliente de ESE pedido. Antes iba a todos, y cada
+      // teléfono con un seguimiento abierto recargaba su pantalla
+      // con cada punto de GPS de cualquier repartidor.
+      return s.rol === 'operador' || (s.rol === 'cliente' && s.id === m.pedidoId);
 
     default:
       return false;

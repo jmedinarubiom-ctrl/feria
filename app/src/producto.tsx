@@ -4,7 +4,7 @@ import {
   type ImageStyle, type StyleProp, type ViewStyle,
 } from 'react-native';
 
-import { BASE } from './api';
+import { servidor } from './api';
 import { C, R } from './tema';
 
 /**
@@ -16,7 +16,7 @@ import { C, R } from './tema';
  * es la IP del local, no `localhost`.
  */
 export const urlDeFoto = (url?: string | null): string | null =>
-  !url ? null : url.startsWith('/') ? BASE + url : url;
+  !url ? null : url.startsWith('/') ? servidor() + url : url;
 
 /**
  * La foto de referencia del producto.
@@ -28,7 +28,7 @@ export const urlDeFoto = (url?: string | null): string | null =>
  * pantalla cae al símbolo.
  */
 export const urlDeReferencia = (productoId?: string | null): string | null =>
-  productoId ? `${BASE}/referencia/${encodeURIComponent(productoId)}` : null;
+  productoId ? `${servidor()}/referencia/${encodeURIComponent(productoId)}` : null;
 
 /**
  * Foto del producto.

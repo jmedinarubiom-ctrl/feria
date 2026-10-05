@@ -286,19 +286,6 @@ test('la liquidación solo cuenta lo que el repartidor efectivamente retiró', a
   assert.ok(confirmada.confirmadoAt, 'el feriante confirma que recibió la plata');
 });
 
-test('un webhook repetido de Shopify no duplica el pedido', async () => {
-  const entrada = {
-    ...pedidoBase([{ productoId: 'p-tomate', cantidad: 4 }]),
-    shopifyOrderId: 'gid://shopify/Order/999',
-  };
-  const a = await crearPedido(entrada);
-  const b = await crearPedido(entrada);
-
-  assert.equal(a.pedidoId, b.pedidoId);
-  const n = await consultarUno<Fila>('SELECT COUNT(*)::int AS n FROM pedidos');
-  assert.equal(n!.n, 1);
-});
-
 test('el feriante ve la oferta con los items y el monto que va a cobrar', async () => {
   await pedidoPagado(pedidoBase([{ productoId: 'p-merluza', cantidad: 2 }]));
 

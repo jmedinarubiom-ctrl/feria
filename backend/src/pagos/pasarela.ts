@@ -1,10 +1,9 @@
 /**
  * Lo único que el dominio necesita de una pasarela de pago.
  *
- * Antes `pagos.ts` importaba Flow directo y hablaba de `token`,
- * `flowOrder` y `status === 2`. Eso hacía que cambiar de pasarela
- * —o tener dos— obligara a tocar la lógica de negocio, que no
- * tiene por qué saber cómo numera los estados un proveedor chileno.
+ * Hoy la única es Mercado Pago. La interfaz se mantiene para que la
+ * lógica de negocio no sepa cómo numera los estados un proveedor,
+ * y para que los tests puedan cobrar con una pasarela de mentira.
  *
  * Tres operaciones: crear el cobro, preguntar cómo terminó, y
  * devolver la plata. Todo lo demás es asunto de cada cliente.

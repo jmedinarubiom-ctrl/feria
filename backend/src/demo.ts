@@ -14,6 +14,7 @@ const BASE = process.env.FERIA_API ?? 'http://localhost:4000';
  * en nombre de otro.
  */
 const TELEFONOS: Record<string, string> = {
+  'cliente': '+56999999999',
   'f-jose': '+56911111111',
   'f-ana': '+56922222222',
   'f-carmen': '+56933333333',
@@ -67,6 +68,7 @@ linea('Cada token identifica a alguien concreto: nadie puede actuar por otro.');
 titulo('1. El cliente hace un pedido mixto');
 
 const pedido = await api('POST', '/pedidos', {
+  actor: 'cliente',
   cuerpo: {
     clienteNombre: 'Juan Manuel',
     clienteTelefono: '+56999999999',
@@ -83,7 +85,13 @@ const pedido = await api('POST', '/pedidos', {
 });
 linea(`Pedido #${pedido.numero} creado.`);
 
-let vista = await api('GET', `/pedidos/${pedido.pedidoId}`);
+// El pedido no sale a la feria hasta que se paga. Acá no hay
+// pasarela: se confirma con la ruta de desarrollo.
+const pago = await api('POST', '/pagos/iniciar', { cuerpo: { pedidoId: pedido.pedidoId } });
+if (pago.pagoId) await api('POST', `/dev/pagar/${pago.pagoId}`);
+linea('Pagado: recién ahora se le ofrece a los feriantes.');
+
+let vista = await api('GET', `/pedidos/${pedido.pedidoId}`, { actor: 'operador' });
 linea(`Total cobrado al cliente: ${clp(vista.total_venta)}`);
 linea(`Se partió en ${vista.subPedidos.length} sub-pedidos (uno por rubro):`);
 for (const s of vista.subPedidos) {
@@ -131,7 +139,7 @@ linea('La cascada se abre a toda la feria y nadie contesta…');
 // los 210 segundos reales de la cascada completa.
 for (let i = 0; i < 3; i++) await api('POST', '/dev/vencer-ofertas');
 
-vista = await api('GET', `/pedidos/${pedido.pedidoId}`);
+vista = await api('GET', `/pedidos/${pedido.pedidoId}`, { actor: 'operador' });
 const pescadoAhora = vista.subPedidos.find((s: any) => s.rubro_id === 'pescado');
 linea(`El pescado queda en: \x1b[33m${pescadoAhora.estado}\x1b[0m  →  lo compras tú.`);
 
@@ -153,7 +161,7 @@ titulo('5. Todos preparan y aparece el viaje');
 await api('POST', `/subpedidos/${verduras.id}/listo`, { actor: 'f-jose' });
 await api('POST', `/subpedidos/${frutas.id}/listo`, { actor: 'f-carmen' });
 await api('POST', `/operador/autogestion/${pescado.id}/listo`, { actor: 'operador' });
-linea('Verduras listas, frutas listas, pescado comprado por tú.');
+linea('Verduras listas, frutas listas, pescado comprado por ti.');
 
 const tableroRep = await api('GET', '/repartidor/tablero', { actor: 'r-diego' });
 const viaje = tableroRep.disponibles[0];
@@ -183,7 +191,7 @@ for (const p of activo.viajeActivo.paradas) {
   await api('POST', '/repartidor/ubicacion', {
     actor: 'r-diego', cuerpo: { lat: -33.048 + Math.random() * 0.003, lng: -71.615 },
   });
-  const v = await api('GET', `/pedidos/${pedido.pedidoId}`);
+  const v = await api('GET', `/pedidos/${pedido.pedidoId}`, { actor: 'operador' });
   linea(`   ✓ completada → pedido en estado ${v.estado}`);
 }
 

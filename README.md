@@ -14,12 +14,11 @@ Feria de referencia: **Av. Argentina, Valparaíso**.
 ```
 feria/
 ├── backend/       Motor de despacho — Node 24 + PostgreSQL, sin build
-├── app/           App móvil — Expo (cliente, feriante, repartidor, operador)
-└── ../shopify-storefront-app/   App del cliente con checkout real de Shopify
+└── app/           App móvil — Expo (cliente, feriante, repartidor, operador)
 ```
 
-El backend es el corazón: Shopify no sabe hacer broadcast, cascada de ofertas,
-ni rutas de retiro. Shopify se encarga de catálogo, carrito, checkout y pago.
+El backend es el corazón: catálogo, pedidos, broadcast a los feriantes, cascada
+de ofertas y rutas de retiro. El cobro lo hace Mercado Pago.
 
 ---
 
@@ -107,8 +106,8 @@ cierren sin castigar a nadie, y que un fallo del reembolso no impida cancelar.
 Del catálogo: que cambiar un precio no altere pedidos existentes, que no se
 pueda vender bajo el costo y que un producto apagado siga listado.
 
-Del pago: que un pedido sin pagar no llegue a ningún feriante, que la firma que
-se le manda a Flow sea la que Flow espera, que un aviso repetido no despache dos
+Del pago: que un pedido sin pagar no llegue a ningún feriante, que se cobre el
+total con despacho, que un aviso repetido no despache dos
 veces, que un monto que no coincide se rechace, y que sin pasarela configurada
 en producción no se regale mercadería.
 
@@ -119,12 +118,12 @@ en producción no se regale mercadería.
 Hay un `Dockerfile` listo. Sirve en Railway, Render, Fly o cualquier cosa que
 corra un contenedor.
 
-1. Creá una base Postgres administrada (Railway, Render, Neon y Supabase tienen
+1. Crea una base Postgres administrada (Railway, Render, Neon y Supabase tienen
    plan gratis para empezar).
-2. Configurá las variables de `.env.example` en el servicio. `DATABASE_URL` y
+2. Configura las variables de `.env.example` en el servicio. `DATABASE_URL` y
    `FERIA_SECRETO` son obligatorias: sin la segunda el servidor no arranca en
    producción, a propósito.
-3. Desplegá. El esquema se aplica solo al arrancar.
+3. Despliega. El esquema se aplica solo al arrancar.
 
 ```bash
 # Generar el secreto
@@ -162,8 +161,8 @@ contratar nada. Teléfonos de la semilla:
 | Diego Araya (repartidor) | `+56 9 0000 0001` |
 | Operador | `+56 9 0000 0009` |
 
-El cliente no necesita sesión: en producción esa parte vive en la app de
-Shopify, con su propio login.
+El cliente entra igual, con su teléfono: cualquier otro celular chileno queda
+registrado como cliente la primera vez que confirma su código.
 
 ---
 
@@ -246,9 +245,9 @@ Para desarrollar un martes hay `FERIA_SIEMPRE_ABIERTA=1`, que abre la feria
 todos los días. Se ignora cuando `NODE_ENV=production`: dejarla abierta de
 verdad un martes significa pedidos que nadie puede cumplir.
 
-**Un pedido que viene de Shopify entra igual fuera de horario**, porque el
-cobro ya ocurrió en su checkout: rechazarlo dejaría al cliente sin pedido y sin
-devolución. Queda anotado en los eventos para que lo veas.
+**Un pago que llega tarde sí entra**, aunque la reserva del pedido ya haya
+vencido: la plata ya se cobró, y rechazarlo dejaría al cliente sin pedido y sin
+devolución.
 
 ---
 
@@ -259,9 +258,9 @@ El cliente arma el carro
    ↓
 Pedido creado en PENDIENTE_PAGO    ← no sale a la feria todavía
    ↓
-Checkout alojado de Flow (tarjeta o transferencia)
+Checkout alojado de Mercado Pago (tarjeta o transferencia)
    ↓
-Flow avisa → le volvemos a preguntar a Flow
+Mercado Pago avisa → le volvemos a preguntar a Mercado Pago
    ↓
 PAGADO → recién ahora se ofrece a los feriantes
 ```
@@ -269,13 +268,13 @@ PAGADO → recién ahora se ofrece a los feriantes
 **Nada se despacha antes de cobrar.** Sin ese estado, ocho feriantes podían
 ponerse a preparar mercadería de un pedido que nadie pagó.
 
-El checkout es alojado: el cliente paga en la página de Flow y vuelve. Por la
+El checkout es alojado: el cliente paga en la página de Mercado Pago y vuelve. Por la
 app nunca pasa un número de tarjeta, así que el sistema queda fuera del alcance
 de PCI.
 
-**La confirmación de Flow no se cree.** El aviso llega por HTTP abierto y
-cualquiera puede inventarlo, así que al recibirlo se le pregunta a Flow con una
-petición firmada, y además se compara el monto: si no coincide con el del
+**La confirmación de Mercado Pago no se cree.** El aviso llega por HTTP abierto y
+cualquiera puede inventarlo, así que al recibirlo se le pregunta a Mercado Pago con
+una petición nuestra, y además se compara el monto: si no coincide con el del
 pedido, no se despacha nada.
 
 Los pedidos de gente que abrió el checkout y no volvió expiran solos a los
@@ -299,7 +298,7 @@ de reparto, así que los pedidos de un solo puesto subsidian a los de varios.
 Los dos umbrales son las palancas del negocio:
 
 - **Envío gratis sobre $25.000.** Al cliente le conviene agregar mercadería
-  antes que pagar el envío, y a tú te conviene que la agregue: el reparto
+  antes que pagar el envío, y a ti te conviene que la agregue: el reparto
   cuesta lo mismo lleve poco o mucho.
 - **Pedido mínimo de $8.000.** Debajo de eso ningún pedido paga su propio
   viaje. Hay un test que lo demuestra con los precios reales del catálogo.
@@ -353,8 +352,8 @@ Te queda                  $2.145   (19% de la venta)
 ```
 
 Sin esa tarjeta solo se ve la venta, que sube igual aunque cada pedido pierda
-plata. Las comisiones se estiman con `TASA_COMISIONES` (por defecto 5,8%:
-pasarela chilena más el recargo de Shopify por no usar Shopify Payments).
+plata. Las comisiones se estiman con `TASA_COMISIONES` (por defecto 3,8%:
+Mercado Pago Checkout Pro con el dinero al instante, 3,19% + IVA).
 
 ---
 
@@ -389,7 +388,7 @@ Cancelaciones (1)        -$6.000
 Te queda                 -$6.000
 ```
 
-El reembolso se pide a Flow fuera de la transacción: si la pasarela no responde,
+El reembolso se pide a Mercado Pago fuera de la transacción: si la pasarela no responde,
 la cancelación ocurre igual —lo importante es que nadie siga preparando un
 pedido muerto— y queda anotado en `/operador/reembolsos-pendientes` para
 resolverlo a mano.
@@ -478,7 +477,7 @@ en tu panel.
 
 En `backend/src/config.ts`: cuántas rondas, a cuántos feriantes, cuántos
 segundos por ventana, cuánto paga un viaje. Cambiar esos números cambia la
-experiencia más que cualquier pantalla. Ajustalos con los datos de la tabla
+experiencia más que cualquier pantalla. Ajústalos con los datos de la tabla
 `ofertas`, no por intuición.
 
 ---
@@ -498,30 +497,6 @@ La columna se pone naranja sobre 15% y roja sobre 30%.
 
 ---
 
-## Conectar Shopify
-
-El backend ya tiene el endpoint y la verificación de firma. Faltan tres cosas:
-
-1. **Mapear el catálogo.** Cada producto de la tabla `productos` necesita su
-   `shopify_variant_id`. Sin eso el webhook rechaza el pedido a propósito:
-   despachar un pedido incompleto es peor que rechazarlo, porque el cliente
-   ya pagó por todo.
-
-2. **Registrar el webhook** en el admin de Shopify, evento `orders/paid`,
-   apuntando a `POST /webhooks/shopify/pedido-pagado`, y poner el secreto en
-   la variable de entorno `SHOPIFY_WEBHOOK_SECRET`.
-
-3. **Ojo:** conectar Shopify significa mantener el catálogo en dos lugares. Los
-   precios de feria cambian todas las semanas, y `shopify_variant_id` hay que
-   sincronizarlo a mano cada vez. El cobro por Flow ya está integrado y no
-   necesita Shopify.
-
-La app del cliente ya existe en `../shopify-storefront-app` (catálogo, carrito
-y Checkout Sheet Kit funcionando). Lo que falta ahí es la pantalla de
-seguimiento, que puede copiarse de `app/src/pantallas/Cliente.tsx`.
-
----
-
 ## Antes de abrirlo al público
 
 Estas cosas están resueltas de forma provisoria a propósito, para poder
@@ -538,7 +513,7 @@ probar en la feria esta semana. No las dejes así:
   (Mapbox o Google Maps SDK).
 - **Contador y SII.** Eres vendedor único: emites boleta al cliente y compras
   a feriantes que no dan documento. Eso se resuelve con **factura de compra
-  con retención**. Andá a un contador antes de escalar, no después.
+  con retención**. Anda a un contador antes de escalar, no después.
 
 ---
 

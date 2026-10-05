@@ -18,7 +18,7 @@ export type Mensaje =
   | { tipo: 'viaje:nuevo'; viajeId: string; pedidoId: string }
   | { tipo: 'viaje:cambio'; viajeId: string; estado: string; repartidorId?: string }
   | { tipo: 'autogestion:nueva'; subPedidoId: string; pedidoId: string }
-  | { tipo: 'ubicacion'; viajeId: string; lat: number; lng: number }
+  | { tipo: 'ubicacion'; viajeId: string; pedidoId: string; lat: number; lng: number }
   | { tipo: 'pedido:cancelado'; pedidoId: string; numero: number; ferianteIds: string[] };
 
 export const bus = new EventEmitter<{ mensaje: [Mensaje] }>();

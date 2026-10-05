@@ -12,9 +12,11 @@ const CLAVE = 'feria.sesion';
 
 export type SesionGuardada = {
   token: string;
-  rol: 'feriante' | 'repartidor' | 'operador';
+  rol: 'feriante' | 'repartidor' | 'operador' | 'cliente';
   actorId: string;
   nombre: string;
+  /** El número con el que entró. */
+  telefono?: string;
 };
 
 export async function guardarSesion(s: SesionGuardada): Promise<void> {

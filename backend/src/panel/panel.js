@@ -73,7 +73,7 @@ const fechaHora = (iso) => new Date(iso).toLocaleString('es-CL',
 const tono = (estado) => ({
   ENTREGADO: 'exito', RETIRADO: 'exito', PAGADO: 'exito', ACEPTADO: 'exito',
   EN_RUTA: 'info', LISTO_PARA_RETIRO: 'info', EN_PREPARACION: 'info',
-  DESPACHANDO: 'aviso', PENDIENTE: 'aviso', PENDIENTE_PAGO: 'aviso', OFERTADO: 'aviso',
+  DESPACHANDO: 'aviso', PENDIENTE: 'aviso', PENDIENTE_PAGO: 'aviso', OFERTANDO: 'aviso',
   AUTOGESTION: 'marca',
   CANCELADO: 'alerta', EXPIRADO: 'alerta',
 }[estado] ?? '');
@@ -610,13 +610,14 @@ function vistaReembolsos() {
     <h1 style="margin-bottom:18px">Reembolsos pendientes</h1>
     <p class="suave" style="margin-top:-10px;margin-bottom:18px">
       Pedidos cancelados que se pagaron y todavía no se devolvieron.
-      La devolución se hace en la pasarela; esta lista es para no olvidarse de ninguno.
+      «Reintentar» se la pide de nuevo a Mercado Pago. Si la hiciste tú desde
+      la página de Mercado Pago, márcala con «Ya lo devolví».
     </p>
     <div class="tarjeta" style="padding:0;overflow:hidden">
       ${lista.length === 0 ? '<div class="vacio">No hay nada por devolver. 🎉</div>' : `
       <table>
         <thead><tr><th>#</th><th>Cliente</th><th>Orden en la pasarela</th>
-                   <th class="num">Monto</th></tr></thead>
+                   <th class="num">Monto</th><th></th></tr></thead>
         <tbody>
           ${lista.map((x) => `
             <tr>
@@ -625,6 +626,11 @@ function vistaReembolsos() {
                   <span class="suave">${esc(x.cliente_telefono)}</span></td>
               <td><code>${esc(x.orden_comercio)}</code></td>
               <td class="num"><strong>${clp(x.monto)}</strong></td>
+              <td class="num">
+                <button class="accion" data-reintentar="${esc(x.pago_id)}">Reintentar</button>
+                <button class="accion secundario" data-devuelto="${esc(x.pago_id)}"
+                        data-monto="${x.monto}">Ya lo devolví</button>
+              </td>
             </tr>`).join('')}
         </tbody>
       </table>`}
@@ -636,65 +642,124 @@ function vistaReembolsos() {
 function vistaGente() {
   const g = datos.gente;
   if (!g) return '';
-  const conectados = g.feriantes.filter((f) => f.conectado).length;
+  const activos = g.feriantes.filter((f) => f.activo);
+  const conectados = activos.filter((f) => f.conectado).length;
+  const f = datos.formGente;
+  const solicitudes = [...g.feriantes, ...g.repartidores].filter((x) => x.pendiente).length;
   return `
     <h1 style="margin-bottom:18px">Gente</h1>
     <p class="suave" style="margin-top:-10px;margin-bottom:18px">
       «Código» genera uno de ingreso para esa persona. Se lo dices en la feria
       o se lo mandas por WhatsApp — no hace falta pagar un SMS por cada ingreso.
     </p>
+    ${solicitudes > 0 ? `<div class="aviso" style="margin-bottom:18px">
+      ${solicitudes === 1 ? 'Hay 1 persona que pidió' : `Hay ${solicitudes} personas que pidieron`}
+      entrar desde la app. Están primero en cada lista: apruébalas solo si las conoces.
+    </div>` : ''}
+    ${f ? formularioGente(f, g.rubros) : ''}
     <div class="pila">
       <div class="tarjeta" style="padding:0;overflow:hidden">
         <div class="fila" style="justify-content:space-between;padding:14px 18px">
           <h2 style="margin:0">Feriantes</h2>
-          <span class="suave">${conectados} de ${g.feriantes.length} recibiendo pedidos</span>
+          <div class="fila">
+            <span class="suave">${conectados} de ${activos.length} recibiendo pedidos</span>
+            <button class="accion" data-nueva="feriante">+ Agregar feriante</button>
+          </div>
         </div>
         ${conectados === 0 ? `<div class="aviso alerta" style="margin:0 18px 14px">
-          No hay ni un puesto conectado: todo lo que entre te va a tocar a tú.
+          No hay ni un puesto conectado: todo lo que entre te va a tocar a ti.
         </div>` : ''}
         <table>
           <thead><tr><th>Nombre</th><th>Puesto</th><th>Rubros</th>
                      <th class="num">En curso</th><th>Estado</th><th></th></tr></thead>
           <tbody>
-            ${g.feriantes.map((f) => `
-              <tr>
-                <td><strong>${esc(f.nombre)}</strong><br>
-                    <span class="suave">${esc(f.telefono)}</span></td>
-                <td class="suave">${esc(f.puesto)}</td>
-                <td class="suave">${esc(f.rubros)}</td>
-                <td class="num">${f.en_curso}</td>
-                <td>${f.conectado ? '<span class="chip exito">recibiendo</span>'
+            ${g.feriantes.map((x) => `
+              <tr style="${x.activo || x.pendiente ? '' : 'opacity:.5'}">
+                <td><strong>${esc(x.nombre)}</strong><br>
+                    <span class="suave">${esc(x.telefono)}</span></td>
+                <td class="suave">${esc(x.puesto)}</td>
+                <td class="suave">${esc(x.rubros)}</td>
+                <td class="num">${x.en_curso}</td>
+                <td>${x.pendiente ? '<span class="chip aviso">pidió entrar</span>'
+                     : !x.activo ? '<span class="chip alerta">de baja</span>'
+                     : x.conectado ? '<span class="chip exito">recibiendo</span>'
                      : '<span class="chip">en pausa</span>'}</td>
-                <td class="num">
-                  <button class="accion secundario" data-codigo="${esc(f.id)}"
-                          data-nombre="${esc(f.nombre)}">Código</button>
-                </td>
+                <td class="num">${botonesPersona('feriante', x)}</td>
               </tr>`).join('')}
           </tbody>
         </table>
       </div>
 
       <div class="tarjeta" style="padding:0;overflow:hidden">
-        <h2 style="padding:14px 18px;margin:0">Repartidores</h2>
+        <div class="fila" style="justify-content:space-between;padding:14px 18px">
+          <h2 style="margin:0">Repartidores</h2>
+          <button class="accion" data-nueva="repartidor">+ Agregar repartidor</button>
+        </div>
         <table>
           <thead><tr><th>Nombre</th><th>Vehículo</th>
                      <th class="num">En ruta</th><th>Estado</th><th></th></tr></thead>
           <tbody>
-            ${g.repartidores.map((r) => `
-              <tr>
-                <td><strong>${esc(r.nombre)}</strong><br>
-                    <span class="suave">${esc(r.telefono)}</span></td>
-                <td class="suave">${esc(r.vehiculo)}</td>
-                <td class="num">${r.en_curso}</td>
-                <td>${r.conectado ? '<span class="chip exito">conectado</span>'
+            ${g.repartidores.map((x) => `
+              <tr style="${x.activo || x.pendiente ? '' : 'opacity:.5'}">
+                <td><strong>${esc(x.nombre)}</strong><br>
+                    <span class="suave">${esc(x.telefono)}</span></td>
+                <td class="suave">${esc(x.vehiculo)}</td>
+                <td class="num">${x.en_curso}</td>
+                <td>${x.pendiente ? '<span class="chip aviso">pidió entrar</span>'
+                     : !x.activo ? '<span class="chip alerta">de baja</span>'
+                     : x.conectado ? '<span class="chip exito">conectado</span>'
                      : '<span class="chip">desconectado</span>'}</td>
-                <td class="num">
-                  <button class="accion secundario" data-codigo="${esc(r.id)}"
-                          data-nombre="${esc(r.nombre)}">Código</button>
-                </td>
+                <td class="num">${botonesPersona('repartidor', x)}</td>
               </tr>`).join('')}
           </tbody>
         </table>
+      </div>
+    </div>`;
+}
+
+const botonesPersona = (tipo, x) => x.activo ? `
+  <button class="accion secundario" data-codigo="${esc(x.id)}"
+          data-nombre="${esc(x.nombre)}">Código</button>
+  <button class="accion secundario" data-editar="${esc(x.id)}" data-tipo="${tipo}">Editar</button>
+  <button class="accion secundario" data-baja="${esc(x.id)}" data-tipo="${tipo}"
+          data-nombre="${esc(x.nombre)}" style="color:var(--rojo)">Dar de baja</button>`
+  : x.pendiente ? `
+  <button class="accion" data-alta="${esc(x.id)}" data-tipo="${tipo}">Aprobar</button>
+  <button class="accion secundario" data-rechazar="${esc(x.id)}" data-tipo="${tipo}"
+          data-nombre="${esc(x.nombre)}">Rechazar</button>` : `
+  <button class="accion secundario" data-alta="${esc(x.id)}" data-tipo="${tipo}">Reactivar</button>`;
+
+/** El mismo formulario para agregar y para corregir. */
+function formularioGente(f, rubros) {
+  const esFeriante = f.tipo === 'feriante';
+  return `
+    <div class="tarjeta" style="margin-bottom:18px">
+      <h2>${f.id ? 'Editar' : 'Agregar'} ${esFeriante ? 'feriante' : 'repartidor'}</h2>
+      <div class="fila" style="align-items:flex-end;flex-wrap:wrap">
+        <label style="flex:1">Nombre<input id="g-nombre" value="${esc(f.nombre ?? '')}"
+               placeholder="${esFeriante ? 'José Sandoval' : 'Diego Araya'}"></label>
+        ${esFeriante
+          ? `<label style="flex:1">Puesto<input id="g-puesto" value="${esc(f.puesto ?? '')}"
+                    placeholder="Puesto 12, sector norte"></label>`
+          : `<label>Vehículo<input id="g-vehiculo" value="${esc(f.vehiculo ?? '')}"
+                    placeholder="moto"></label>`}
+        <label>Teléfono<input id="g-telefono" value="${esc(f.telefono ?? '')}"
+               placeholder="+56 9 1234 5678" inputmode="tel"></label>
+      </div>
+      ${esFeriante ? `
+        <div class="fila" style="margin-top:12px;flex-wrap:wrap">
+          <span class="suave">Qué vende:</span>
+          ${rubros.map((r) => `
+            <label style="display:inline-flex;gap:6px;align-items:center">
+              <input type="checkbox" data-rubro="${esc(r.id)}"
+                     ${(f.rubros ?? []).includes(r.id) ? 'checked' : ''}>${esc(r.nombre)}
+            </label>`).join('')}
+        </div>` : ''}
+      <div class="fila" style="margin-top:14px">
+        <button class="accion" id="g-guardar">${f.id ? 'Guardar' : 'Agregar'}</button>
+        <button class="accion secundario" id="g-cancelar">Cancelar</button>
+        <span class="suave">Entra con ese teléfono. Empieza en pausa hasta que
+          encienda el interruptor en su app.</span>
       </div>
     </div>`;
 }
@@ -756,7 +821,7 @@ function pintar() {
     <header class="barra">
       <span class="marca"><img src="/admin/marca.png" alt="" onerror="this.remove()">Feria</span>
       <span class="crece"></span>
-      <span class="quien">${esc(yo?.nombre ?? '')}<br>
+      <span class="quien">${esc(yo?.perfil?.nombre ?? '')}<br>
         <span class="suave">Operación</span></span>
       <button class="accion secundario" id="salir">Salir</button>
       <button class="accion secundario" id="salir-todos"
@@ -816,7 +881,7 @@ function conectar() {
     void cargar();
   });
   en('[data-cancelar]', 'click', async (e) => {
-    const motivo = prompt('¿Por qué se cancela? El cliente va a ver este motivo.');
+    const motivo = prompt('¿Por qué se cancela? Queda anotado en la bitácora del pedido.');
     if (!motivo) return;
     const id = e.currentTarget.dataset.cancelar;
     detalle = null;
@@ -873,11 +938,81 @@ function conectar() {
     } catch (err) { avisar(err.message); }
   });
 
+  // ---- Gente: alta, cambios y baja ----
+  const rutaDe = (tipo, id) =>
+    `/operador/${tipo === 'feriante' ? 'feriantes' : 'repartidores'}${id ? `/${id}` : ''}`;
+
+  en('[data-nueva]', 'click', (e) => {
+    datos.formGente = { tipo: e.currentTarget.dataset.nueva, rubros: [] };
+    pintar();
+  });
+  en('[data-editar]', 'click', (e) => {
+    const { editar: id, tipo } = e.currentTarget.dataset;
+    const lista = tipo === 'feriante' ? datos.gente.feriantes : datos.gente.repartidores;
+    const x = lista.find((p) => p.id === id);
+    datos.formGente = { tipo, id, nombre: x.nombre, puesto: x.puesto, vehiculo: x.vehiculo,
+                        telefono: x.telefono, rubros: x.rubro_ids ?? [] };
+    pintar();
+    window.scrollTo({ top: 0 });
+  });
+  document.getElementById('g-cancelar')?.addEventListener('click', () => {
+    datos.formGente = null; pintar();
+  });
+  document.getElementById('g-guardar')?.addEventListener('click', () => {
+    const f = datos.formGente;
+    const v = (id) => document.getElementById(id)?.value.trim();
+    const cuerpo = f.tipo === 'feriante'
+      ? { nombre: v('g-nombre'), puesto: v('g-puesto'), telefono: v('g-telefono'),
+          rubros: [...document.querySelectorAll('[data-rubro]:checked')]
+            .map((el) => el.dataset.rubro) }
+      : { nombre: v('g-nombre'), vehiculo: v('g-vehiculo'), telefono: v('g-telefono') };
+    // Lo escrito se guarda antes de mandar: si el servidor lo
+    // rechaza, el formulario se repinta y no hay que tipear de nuevo.
+    datos.formGente = { ...f, ...cuerpo };
+    return accion(async () => {
+      await api('POST', rutaDe(f.tipo, f.id), cuerpo);
+      datos.formGente = null;
+    }, f.id ? 'Guardado.' : 'Agregado. Dale su código para que entre.');
+  });
+  en('[data-baja]', 'click', (e) => {
+    const { baja: id, tipo, nombre } = e.currentTarget.dataset;
+    if (!confirm(`¿Dar de baja a ${nombre}? Deja de recibir pedidos y se le cierra la sesión. `
+               + 'Su historial queda, y se puede reactivar.')) return;
+    return accion(() => api('POST', rutaDe(tipo, id), { activo: false }), 'Dado de baja.');
+  });
+  en('[data-alta]', 'click', (e) => {
+    const { alta: id, tipo } = e.currentTarget.dataset;
+    return accion(() => api('POST', rutaDe(tipo, id), { activo: true }),
+                  'Listo. Que salga de la app y vuelva a entrar con su teléfono.');
+  });
+  en('[data-rechazar]', 'click', (e) => {
+    const { rechazar: id, tipo, nombre } = e.currentTarget.dataset;
+    if (!confirm(`¿Rechazar la solicitud de ${nombre}? Sigue pudiendo comprar como cliente.`)) return;
+    return accion(() => api('POST', rutaDe(tipo, id), { pendiente: false }), 'Solicitud rechazada.');
+  });
+
+  // ---- Reembolsos ----
+  en('[data-reintentar]', 'click', (e) => {
+    const id = e.currentTarget.dataset.reintentar;
+    return accion(async () => {
+      const r = await api('POST', `/operador/reembolsos/${id}/reintentar`);
+      if (!r.solicitado) throw new Error(`No se pudo devolver: ${r.motivo ?? 'sin detalle'}`);
+    }, 'Devolución pedida.');
+  });
+  en('[data-devuelto]', 'click', (e) => {
+    const { devuelto: id, monto } = e.currentTarget.dataset;
+    if (!confirm(`¿Ya le devolviste ${clp(Number(monto))} por tu cuenta? Sale de esta lista.`)) return;
+    return accion(() => api('POST', `/operador/reembolsos/${id}/hecho`), 'Anotado.');
+  });
+
   // ---- Liquidaciones ----
   en('[data-pagar]', 'click', (e) => {
     const { pagar, nombre, monto } = e.currentTarget.dataset;
     if (!confirm(`¿Le pagaste ${clp(Number(monto))} en efectivo a ${nombre}?`)) return;
-    return accion(() => api('POST', `/operador/liquidaciones/${pagar}/pagar`),
+    // El día que se está mirando. Sin la fecha el servidor anotaba
+    // el pago en HOY aunque la tabla mostrara ayer.
+    return accion(() => api('POST', `/operador/liquidaciones/${pagar}/pagar`,
+                            { fecha: datos.dia ?? hoyISO() }),
                   'Anotado. Falta que lo confirme desde su teléfono.');
   });
 }
@@ -973,3 +1108,19 @@ async function arrancar() {
 }
 
 void arrancar();
+
+/**
+ * El panel se pone al día solo.
+ *
+ * Antes mostraba lo que había al cargar la sección y nada más: un
+ * pedido que caía en autogestión no aparecía hasta que alguien
+ * hacía clic. No refresca mientras hay algo abierto o a medio
+ * escribir —repintar borraría lo tipeado— ni con la pestaña oculta.
+ */
+setInterval(() => {
+  if (!token || !yo || cargando || detalle || document.hidden) return;
+  if (seccion === 'catalogo' || datos.formGente) return;
+  const foco = document.activeElement?.tagName;
+  if (foco === 'INPUT' || foco === 'SELECT') return;
+  void cargar();
+}, 20_000);

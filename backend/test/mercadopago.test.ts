@@ -266,7 +266,7 @@ test('no se reembolsa por una pasarela distinta a la que cobró', async () => {
     transaction_amount: 11300, payment_type_id: 'credit_card',
   };
   await confirmarDesdePasarela('pay-906');
-  await ejecutar(`UPDATE pagos SET proveedor = 'flow' WHERE orden_comercio = ?`, orden);
+  await ejecutar(`UPDATE pagos SET proveedor = 'otra' WHERE orden_comercio = ?`, orden);
 
   const r = await cancelarPedido({ pedidoId, motivo: 'prueba' });
   assert.equal(reembolsos.length, 0, 'no se llamó a Mercado Pago');
@@ -379,7 +379,6 @@ test('sin credenciales, en desarrollo se puede seguir probando', async () => {
     fijarPasarela(null); olvidarPasarela();
     process.env.PASARELA = 'mercadopago';
     delete process.env.MP_ACCESS_TOKEN;
-    delete process.env.FLOW_API_KEY;
     process.env.NODE_ENV = 'development';
 
     assert.equal(pasarela(), null, 'avisa y sigue');

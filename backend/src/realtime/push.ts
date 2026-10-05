@@ -157,7 +157,7 @@ async function avisosDeViaje(m: Extract<Mensaje, { tipo: 'viaje:nuevo' }>): Prom
   if (!viaje) return [];
 
   const repartidores = await consultar<Fila>(
-    'SELECT push_token FROM repartidores WHERE conectado AND push_token IS NOT NULL');
+    'SELECT push_token FROM repartidores WHERE conectado AND activo AND push_token IS NOT NULL');
 
   return repartidores.map((r) => ({
     to: r.push_token,

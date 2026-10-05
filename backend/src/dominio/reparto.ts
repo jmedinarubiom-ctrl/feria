@@ -2,15 +2,17 @@ import { CONFIG } from '../config.ts';
 import {
   ahora, consultar, consultarUno, ejecutar, enTransaccion, id, registrarEvento, type Fila,
 } from '../db/index.ts';
-import { EstadoSubPedido, EstadoViaje, TRANSICIONES_VIAJE, validarTransicion } from './estados.ts';
+import {
+  ErrorNegocio, EstadoSubPedido, EstadoViaje, TRANSICIONES_VIAJE, validarTransicion,
+} from './estados.ts';
 import { publicar } from '../realtime/bus.ts';
 import { evaluarPedido } from './despacho.ts';
 
 async function cambiarEstadoViaje(
   viajeId: string, hacia: EstadoViaje, extra: Fila = {},
 ): Promise<Fila> {
-  const viaje = await consultarUno<Fila>('SELECT * FROM viajes WHERE id = ?', viajeId);
-  if (!viaje) throw new Error(`Viaje inexistente: ${viajeId}`);
+  const viaje = await consultarUno<Fila>('SELECT * FROM viajes WHERE id = ? FOR UPDATE', viajeId);
+  if (!viaje) throw new ErrorNegocio(404, `Viaje inexistente: ${viajeId}`);
   if (viaje.estado === hacia) return viaje;
   validarTransicion('viaje', TRANSICIONES_VIAJE, viaje.estado, hacia);
 
@@ -41,40 +43,22 @@ export async function crearViaje(pedidoId: string): Promise<string> {
   if (yaHay) return yaHay.id;
 
   const pedido = await consultarUno<Fila>('SELECT * FROM pedidos WHERE id = ?', pedidoId);
-  const subs = await consultar<Fila>(
-    `SELECT s.*, f.nombre AS feriante_nombre, f.puesto, f.lat AS f_lat, f.lng AS f_lng
-       FROM sub_pedidos s
-       LEFT JOIN feriantes f ON f.id = s.feriante_id
-      WHERE s.pedido_id = ? AND s.estado <> ?`,
-    pedidoId, EstadoSubPedido.CANCELADO);
+  const retiros = await retirosPendientes(pedidoId);
 
   const viajeId = id();
-  const grupos = new Map<string, Fila[]>();
-  for (const s of subs) {
-    const clave = s.feriante_id ?? '__autogestion__';
-    grupos.set(clave, [...(grupos.get(clave) ?? []), s]);
-  }
-
-  const tarifa = CONFIG.tarifaReparto + Math.max(0, grupos.size - 1) * CONFIG.tarifaPorParadaExtra;
+  const tarifa = CONFIG.tarifaReparto
+    + Math.max(0, retiros.length - 1) * CONFIG.tarifaPorParadaExtra;
   await ejecutar(
     `INSERT INTO viajes (id, pedido_id, estado, tarifa) VALUES (?, ?, ?, ?)`,
     viajeId, pedidoId, EstadoViaje.BUSCANDO, tarifa,
   );
 
   let orden = 0;
-  for (const [clave, lista] of grupos) {
-    const esAutogestion = clave === '__autogestion__';
-    const ref = lista[0];
-    const etiqueta = esAutogestion
-      ? `Autogestión — retiro con el operador (${lista.length} ${lista.length === 1 ? 'bolsa' : 'bolsas'})`
-      : `${ref.puesto} — ${ref.feriante_nombre}`;
-    // Una parada puede cubrir varios sub-pedidos del mismo puesto;
-    // se guarda el primero como referencia y el resto se resuelve
-    // por feriante al completar la parada.
+  for (const r of retiros) {
     await ejecutar(
       `INSERT INTO paradas (id, viaje_id, orden, tipo, sub_pedido_id, etiqueta, lat, lng)
        VALUES (?, ?, ?, 'RETIRO', ?, ?, ?, ?)`,
-      id(), viajeId, orden++, ref.id, etiqueta, ref.f_lat ?? null, ref.f_lng ?? null,
+      id(), viajeId, orden++, r.subPedidoId, r.etiqueta, r.lat, r.lng,
     );
   }
   await ejecutar(
@@ -87,6 +71,104 @@ export async function crearViaje(pedidoId: string): Promise<string> {
   await registrarEvento('viaje', viajeId, 'creado', { pedidoId, paradas: orden + 1, tarifa });
   publicar({ tipo: 'viaje:nuevo', viajeId, pedidoId });
   return viajeId;
+}
+
+/** Los sub-pedidos que tienen dueño y todavía están en la feria. */
+const POR_RETIRAR = [EstadoSubPedido.ACEPTADO, EstadoSubPedido.AUTOGESTION, EstadoSubPedido.LISTO];
+
+type Retiro = { subPedidoId: string; etiqueta: string; lat: number | null; lng: number | null };
+
+/**
+ * Las paradas de retiro que hacen falta ahora mismo.
+ *
+ * Se agrupan por feriante: si el mismo puesto se quedó con dos
+ * sub-pedidos, es una sola parada. Una parada guarda el primero
+ * como referencia y el resto se resuelve por feriante al
+ * completarla. Lo que está ofertándose no tiene parada: todavía no
+ * se sabe en qué puesto va a estar.
+ */
+async function retirosPendientes(pedidoId: string): Promise<Retiro[]> {
+  const subs = await consultar<Fila>(
+    `SELECT s.*, f.nombre AS feriante_nombre, f.puesto, f.lat AS f_lat, f.lng AS f_lng
+       FROM sub_pedidos s
+       LEFT JOIN feriantes f ON f.id = s.feriante_id
+      WHERE s.pedido_id = ? AND s.estado IN (?, ?, ?)
+      ORDER BY s.creado_at, s.id`,
+    pedidoId, ...POR_RETIRAR);
+
+  const grupos = new Map<string, Fila[]>();
+  for (const s of subs) {
+    const clave = s.feriante_id ?? '__autogestion__';
+    grupos.set(clave, [...(grupos.get(clave) ?? []), s]);
+  }
+
+  return [...grupos].map(([clave, lista]) => {
+    const ref = lista[0];
+    return {
+      subPedidoId: ref.id,
+      etiqueta: clave === '__autogestion__'
+        ? `Autogestión — retiro con el operador (${lista.length} ${lista.length === 1 ? 'bolsa' : 'bolsas'})`
+        : `${ref.puesto} — ${ref.feriante_nombre}`,
+      lat: ref.f_lat ?? null,
+      lng: ref.f_lng ?? null,
+    };
+  });
+}
+
+/**
+ * Pone las paradas del viaje al día con quién tiene cada bolsa.
+ *
+ * El viaje se arma cuando todos los sub-pedidos tienen dueño, pero
+ * el dueño puede cambiar después: un feriante que aceptó y devuelve
+ * el pedido («no lo puedo cumplir»). Las paradas quedaban como se
+ * crearon, y el repartidor iba a buscar la bolsa al puesto que la
+ * había devuelto — y al tocar RETIRADO marcaba como retirado algo
+ * que todavía se estaba ofertando.
+ *
+ * Las paradas ya completadas no se tocan. Si no cambió nada no
+ * escribe nada, para no cambiarle los ids a la app del repartidor.
+ */
+export async function sincronizarParadas(pedidoId: string): Promise<void> {
+  const viaje = await consultarUno<Fila>(
+    `SELECT * FROM viajes WHERE pedido_id = ? AND estado IN (?, ?, ?)`,
+    pedidoId, EstadoViaje.BUSCANDO, EstadoViaje.ASIGNADO, EstadoViaje.RETIRANDO);
+  if (!viaje) return;
+
+  const deseadas = await retirosPendientes(pedidoId);
+  const actuales = await consultar<Fila>(
+    `SELECT sub_pedido_id, etiqueta FROM paradas
+      WHERE viaje_id = ? AND tipo = 'RETIRO' AND completada_at IS NULL`, viaje.id);
+
+  const firma = (l: Array<{ ref: string; etiqueta: string }>) =>
+    l.map((p) => `${p.ref}|${p.etiqueta}`).sort().join('\n');
+  if (firma(actuales.map((p) => ({ ref: p.sub_pedido_id, etiqueta: p.etiqueta })))
+      === firma(deseadas.map((p) => ({ ref: p.subPedidoId, etiqueta: p.etiqueta })))) return;
+
+  await ejecutar(
+    `DELETE FROM paradas WHERE viaje_id = ? AND tipo = 'RETIRO' AND completada_at IS NULL`,
+    viaje.id);
+  const hechas = await consultarUno<Fila>(
+    `SELECT COALESCE(MAX(orden), -1)::int AS n FROM paradas
+      WHERE viaje_id = ? AND tipo = 'RETIRO'`, viaje.id);
+  let orden = hechas!.n + 1;
+
+  // La entrega va siempre al final. Se corre primero: el orden es
+  // único por viaje y si no chocaría con los retiros nuevos.
+  await ejecutar(`UPDATE paradas SET orden = ? WHERE viaje_id = ? AND tipo = 'ENTREGA'`,
+    orden + deseadas.length, viaje.id);
+  for (const r of deseadas) {
+    await ejecutar(
+      `INSERT INTO paradas (id, viaje_id, orden, tipo, sub_pedido_id, etiqueta, lat, lng)
+       VALUES (?, ?, ?, 'RETIRO', ?, ?, ?, ?)`,
+      id(), viaje.id, orden++, r.subPedidoId, r.etiqueta, r.lat, r.lng);
+  }
+
+  await registrarEvento('viaje', viaje.id, 'paradas actualizadas',
+    { retiros: deseadas.map((r) => r.etiqueta) });
+  publicar({
+    tipo: 'viaje:cambio', viajeId: viaje.id, estado: viaje.estado,
+    repartidorId: viaje.repartidor_id ?? undefined,
+  });
 }
 
 export class ViajeNoDisponible extends Error {
@@ -119,8 +201,11 @@ export async function aceptarViaje(viajeId: string, repartidorId: string): Promi
  */
 export async function completarParada(paradaId: string, repartidorId: string): Promise<void> {
   await enTransaccion(async () => {
-    const parada = await consultarUno<Fila>('SELECT * FROM paradas WHERE id = ?', paradaId);
-    if (!parada) throw new Error(`Parada inexistente: ${paradaId}`);
+    // Con candado: dos toques seguidos al botón no completan la
+    // parada dos veces.
+    const parada = await consultarUno<Fila>(
+      'SELECT * FROM paradas WHERE id = ? FOR UPDATE', paradaId);
+    if (!parada) throw new ErrorNegocio(404, `Parada inexistente: ${paradaId}`);
     if (parada.completada_at) return;
 
     const viaje = await consultarUno<Fila>('SELECT * FROM viajes WHERE id = ?', parada.viaje_id);
@@ -133,7 +218,7 @@ export async function completarParada(paradaId: string, repartidorId: string): P
           .includes(viaje!.estado)) {
       throw new ViajeNoDisponible(
         viaje!.estado === EstadoViaje.CANCELADO
-          ? 'Este viaje se canceló. Andá al detalle del pedido.'
+          ? 'Este viaje se canceló. Anda al detalle del pedido.'
           : 'Este viaje ya está cerrado.');
     }
 
@@ -153,13 +238,18 @@ export async function completarParada(paradaId: string, repartidorId: string): P
     if (parada.tipo === 'RETIRO') {
       const ref = await consultarUno<Fila>(
         'SELECT * FROM sub_pedidos WHERE id = ?', parada.sub_pedido_id);
+      // Solo lo que tiene dueño y sigue en la feria. Sin el filtro
+      // de estado, la parada de autogestión —que busca «sin
+      // feriante»— se llevaba también lo que estaba ofertándose.
       const hermanos = ref!.feriante_id
         ? await consultar<Fila>(
-            `SELECT * FROM sub_pedidos WHERE pedido_id = ? AND feriante_id = ? AND estado <> ?`,
-            ref!.pedido_id, ref!.feriante_id, EstadoSubPedido.CANCELADO)
+            `SELECT * FROM sub_pedidos
+              WHERE pedido_id = ? AND feriante_id = ? AND estado IN (?, ?, ?)`,
+            ref!.pedido_id, ref!.feriante_id, ...POR_RETIRAR)
         : await consultar<Fila>(
-            `SELECT * FROM sub_pedidos WHERE pedido_id = ? AND feriante_id IS NULL AND estado <> ?`,
-            ref!.pedido_id, EstadoSubPedido.CANCELADO);
+            `SELECT * FROM sub_pedidos
+              WHERE pedido_id = ? AND feriante_id IS NULL AND estado IN (?, ?, ?)`,
+            ref!.pedido_id, ...POR_RETIRAR);
 
       for (const s of hermanos) {
         if (s.estado === EstadoSubPedido.ACEPTADO || s.estado === EstadoSubPedido.AUTOGESTION) {
@@ -175,14 +265,22 @@ export async function completarParada(paradaId: string, repartidorId: string): P
         });
       }
 
+      // Se cuenta lo que falta retirar, no las paradas: un
+      // sub-pedido que volvió a ofertarse no tiene parada todavía,
+      // y el repartidor no puede salir sin esa bolsa.
       const faltanRetiros = await consultarUno<Fila>(
-        `SELECT COUNT(*)::int AS n FROM paradas
-          WHERE viaje_id = ? AND tipo = 'RETIRO' AND completada_at IS NULL`, viaje!.id);
+        `SELECT COUNT(*)::int AS n FROM sub_pedidos
+          WHERE pedido_id = ? AND estado NOT IN (?, ?)`,
+        ref!.pedido_id, EstadoSubPedido.RETIRADO, EstadoSubPedido.CANCELADO);
       if ((faltanRetiros?.n ?? 0) === 0) {
         await cambiarEstadoViaje(viaje!.id, EstadoViaje.EN_RUTA);
       }
       await evaluarPedido(ref!.pedido_id);
     } else {
+      if (viaje!.estado !== EstadoViaje.EN_RUTA) {
+        throw new ViajeNoDisponible(
+          'Todavía falta una bolsa: se está buscando otro puesto. Espera el aviso.');
+      }
       await cambiarEstadoViaje(viaje!.id, EstadoViaje.ENTREGADO, { entregado_at: ahora() });
       await ejecutar('UPDATE pedidos SET estado = ?, entregado_at = ? WHERE id = ?',
         'ENTREGADO', ahora(), viaje!.pedido_id);
@@ -199,12 +297,12 @@ export async function registrarUbicacion(
     lat, lng, ahora(), repartidorId);
 
   const viaje = await consultarUno<Fila>(
-    `SELECT id FROM viajes WHERE repartidor_id = ? AND estado IN (?, ?, ?)`,
+    `SELECT id, pedido_id FROM viajes WHERE repartidor_id = ? AND estado IN (?, ?, ?)`,
     repartidorId, EstadoViaje.ASIGNADO, EstadoViaje.RETIRANDO, EstadoViaje.EN_RUTA);
   if (!viaje) return;
 
   await ejecutar(
     'INSERT INTO ubicaciones (repartidor_id, viaje_id, lat, lng) VALUES (?, ?, ?, ?)',
     repartidorId, viaje.id, lat, lng);
-  publicar({ tipo: 'ubicacion', viajeId: viaje.id, lat, lng });
+  publicar({ tipo: 'ubicacion', viajeId: viaje.id, pedidoId: viaje.pedido_id, lat, lng });
 }

@@ -2,6 +2,9 @@ import { consultar, ejecutar } from '../src/db/index.ts';
 import { sembrar } from '../src/db/semilla.ts';
 import { crearPedido, confirmarPago, type PedidoEntrante } from '../src/dominio/despacho.ts';
 import { fijarHorario } from '../src/dominio/horario.ts';
+import type {
+  DatosCobro, DatosReembolso, EstadoCobro, Pasarela,
+} from '../src/pagos/pasarela.ts';
 
 // La feria de prueba abre todos los días de corrido. Así la
 // verificación de horario sigue ejecutándose en cada test —no se
@@ -38,4 +41,44 @@ export async function pedidoPagado(entrada: PedidoEntrante) {
   const r = await crearPedido(entrada);
   await confirmarPago(r.pedidoId);
   return r;
+}
+
+
+/**
+ * Una pasarela de mentira.
+ *
+ * Los tests del cobro, la cancelación y el reembolso prueban lo que
+ * hace el dominio con CUALQUIER pasarela, no los detalles de una.
+ * Guarda lo que se le pidió y contesta lo que el test le diga. Los
+ * detalles de Mercado Pago tienen su propio archivo.
+ */
+export function pasarelaDeMentira() {
+  const p = {
+    nombre: 'mentira',
+    creados: [] as DatosCobro[],
+    reembolsos: [] as DatosReembolso[],
+    /** Lo que va a contestar `consultar`. */
+    estado: null as Partial<EstadoCobro> | null,
+    /** Con esto, pedir un reembolso falla como si no respondiera. */
+    caida: false,
+
+    async crear(datos: DatosCobro) {
+      p.creados.push(datos);
+      const referencia = `tok-${datos.ordenComercio}`;
+      return { url: `https://pasarela.test/pagar?token=${referencia}`, referencia };
+    },
+    async consultar(referencia: string): Promise<EstadoCobro> {
+      if (!p.estado) throw new Error('la pasarela no conoce ese cobro');
+      return {
+        pagado: false, cerrado: false, medio: null, ordenComercio: '',
+        monto: 0, referencia, crudo: {}, ...p.estado,
+      };
+    },
+    async reembolsar(datos: DatosReembolso) {
+      if (p.caida) throw new Error('la pasarela no responde');
+      p.reembolsos.push(datos);
+      return { referencia: 'rf-1', aceptado: true };
+    },
+  } satisfies Pasarela & Record<string, unknown>;
+  return p;
 }

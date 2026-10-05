@@ -1,9 +1,6 @@
 import { ahora, consultar, consultarUno, ejecutar, enTransaccion, id, registrarEvento, type Fila } from '../db/index.ts';
 import { confirmarPago } from './despacho.ts';
-import { configDesdeEntorno as configFlowDesdeEntorno, crearPasarelaFlow } from '../pagos/flow.ts';
-import {
-  configDesdeEntorno as configMPDesdeEntorno, crearPasarelaMercadoPago,
-} from '../pagos/mercadopago.ts';
+import { configDesdeEntorno, crearPasarelaMercadoPago } from '../pagos/mercadopago.ts';
 import type { Pasarela } from '../pagos/pasarela.ts';
 
 export class ErrorPago extends Error {
@@ -18,11 +15,8 @@ export class ErrorPago extends Error {
 let elegida: Pasarela | null | undefined;
 
 /**
- * Qué pasarela se usa.
- *
- * `PASARELA` manda; sin ella, la que tenga credenciales. Si las dos
- * están configuradas y nadie eligió, gana Mercado Pago, que es la
- * que más gente tiene instalada en Chile.
+ * La pasarela con la que se cobra: Mercado Pago, si tiene sus
+ * credenciales (`MP_ACCESS_TOKEN` y `URL_PUBLICA`).
  *
  * Se resuelve una vez por proceso. Los tests la reemplazan con
  * `fijarPasarela`.
@@ -30,31 +24,25 @@ let elegida: Pasarela | null | undefined;
 export function pasarela(): Pasarela | null {
   if (elegida !== undefined) return elegida;
 
-  const pedida = (process.env.PASARELA ?? '').toLowerCase();
-  const flow = configFlowDesdeEntorno();
-  const mp = configMPDesdeEntorno();
-
-  if (pedida === 'flow' && flow) elegida = crearPasarelaFlow(flow);
-  else if (pedida === 'mercadopago' && mp) elegida = crearPasarelaMercadoPago(mp);
-  else if (pedida === 'flow' || pedida === 'mercadopago') {
-    // Se pidió una pasarela y le faltan credenciales.
-    const falta = pedida === 'flow'
-      ? 'FLOW_API_KEY, FLOW_SECRET_KEY y URL_PUBLICA'
-      : 'MP_ACCESS_TOKEN y URL_PUBLICA';
+  const mp = configDesdeEntorno();
+  if (mp) {
+    elegida = crearPasarelaMercadoPago(mp);
+  } else if ((process.env.PASARELA ?? '').toLowerCase() === 'mercadopago') {
+    // Se pidió cobrar y faltan las credenciales.
+    const falta = 'MP_ACCESS_TOKEN y URL_PUBLICA';
     if (process.env.NODE_ENV === 'production') {
       // En producción es un error: un pedido sin cobrar no es un
       // pedido gratis, es plata que se pierde.
-      throw new ErrorPago(503, `PASARELA=${pedida} pero faltan ${falta}.`);
+      throw new ErrorPago(503, `PASARELA=mercadopago pero faltan ${falta}.`);
     }
     // En desarrollo se avisa y se sigue sin pasarela, para poder
     // recorrer el flujo completo antes de tener las credenciales.
-    // Antes esto reventaba y no dejaba probar absolutamente nada.
     console.warn(
-      `[pagos] PASARELA=${pedida} pero faltan ${falta}.\n`
+      `[pagos] PASARELA=mercadopago pero faltan ${falta}.\n`
       + '        Se sigue sin cobrar, que es lo que corresponde en desarrollo.');
     elegida = null;
   } else {
-    elegida = mp ? crearPasarelaMercadoPago(mp) : flow ? crearPasarelaFlow(flow) : null;
+    elegida = null;
   }
   return elegida;
 }
@@ -68,13 +56,31 @@ export const pasarelaConfigurada = (): boolean => pasarela() !== null;
 /**
  * Arranca el cobro de un pedido.
  *
- * Devuelve la URL de Flow a la que hay que mandar al cliente. Si el
+ * Devuelve la URL de la pasarela a la que hay que mandar al cliente. Si el
  * pedido ya tiene un cobro abierto se devuelve el mismo, para que
  * volver atrás en la app no genere dos órdenes de pago.
  */
-export async function iniciarPago(
-  pedidoId: string, email: string,
-): Promise<{ url: string | null; pagoId: string; yaPagado: boolean }> {
+type PagoIniciado = { url: string | null; pagoId: string; yaPagado: boolean };
+
+/** Inicios de pago en vuelo, por pedido. */
+const iniciando = new Map<string, Promise<PagoIniciado>>();
+
+/**
+ * Dos toques al botón de pagar llegan como dos peticiones juntas.
+ * Las dos veían que no había cobro abierto —el primero todavía
+ * estaba hablando con la pasarela— y creaban uno cada una. La
+ * segunda espera a la primera y recibe el mismo cobro.
+ */
+export function iniciarPago(pedidoId: string, email: string): Promise<PagoIniciado> {
+  const enVuelo = iniciando.get(pedidoId);
+  if (enVuelo) return enVuelo;
+  const promesa = iniciarPagoDeVerdad(pedidoId, email)
+    .finally(() => iniciando.delete(pedidoId));
+  iniciando.set(pedidoId, promesa);
+  return promesa;
+}
+
+async function iniciarPagoDeVerdad(pedidoId: string, email: string): Promise<PagoIniciado> {
   const pedido = await consultarUno<Fila>('SELECT * FROM pedidos WHERE id = ?', pedidoId);
   if (!pedido) throw new ErrorPago(404, 'Pedido no encontrado.');
 
@@ -142,8 +148,7 @@ export async function iniciarPago(
 /**
  * Confirma un pago a partir de lo que avisó la pasarela.
  *
- * `referencia` es el token de Flow o el id del payment de Mercado
- * Pago. Nunca se cree lo que dice el aviso: llega por HTTP desde
+ * `referencia` es el id del payment de Mercado Pago. Nunca se cree lo que dice el aviso: llega por HTTP desde
  * fuera y cualquiera puede inventarlo. Lo único que vale es
  * preguntarle a la pasarela con una petición nuestra.
  */
@@ -199,7 +204,7 @@ export async function confirmarDesdePasarela(
  * Confirmación de desarrollo, sin pasarela.
  *
  * Existe para poder recorrer el flujo completo sin credenciales de
- * Flow. Se apaga sola en producción.
+ * la pasarela. Se apaga sola en producción.
  */
 export async function confirmarEnDesarrollo(pagoId: string): Promise<boolean> {
   if (process.env.NODE_ENV === 'production') {

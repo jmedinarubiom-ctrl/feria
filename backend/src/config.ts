@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
  *
  * Estos números son el producto. Cambiarlos cambia la experiencia
  * más que cualquier pantalla: una ventana corta frustra al feriante,
- * una larga deja al cliente esperando. Ajustalos con datos reales
+ * una larga deja al cliente esperando. Ajústalos con datos reales
  * de la tabla `ofertas`, no por intuición.
  */
 function normalizarUrl(valor: string | undefined): string | undefined {
@@ -86,8 +86,7 @@ export const CONFIG = {
    * Lo que se llevan las comisiones de cada venta.
    *
    * El valor por defecto es Mercado Pago Checkout Pro con el dinero
-   * al instante: 3,19% + IVA. A 10 días baja a 3,44%, y la
-   * transferencia de Flow cuesta bastante menos (~1,18%).
+   * al instante: 3,19% + IVA. A 10 días baja a 3,44%.
    *
    * No es un detalle contable: de acá sale el «te queda» del panel,
    * y con un margen de $2.500 por pedido cada punto se nota. Ponlo

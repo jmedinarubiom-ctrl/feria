@@ -1,5 +1,5 @@
 import { ahora, consultar, consultarUno, ejecutar, enTransaccion, id, registrarEvento, type Fila } from '../db/index.ts';
-import { EstadoSubPedido } from './estados.ts';
+import { ErrorNegocio, EstadoSubPedido } from './estados.ts';
 import { CONFIG } from '../config.ts';
 
 /**
@@ -98,7 +98,7 @@ export async function liquidacionesDelDia(fecha = hoy()) {
 export async function marcarPagado(ferianteId: string, fecha = hoy()) {
   return enTransaccion(async () => {
     const calc = await calcularLiquidacion(ferianteId, fecha);
-    if (calc.cantidad === 0) throw new Error('No hay nada que pagar a este feriante en esa fecha.');
+    if (calc.cantidad === 0) throw new ErrorNegocio(409, 'No hay nada que pagar a este feriante en esa fecha.');
 
     const existente = await consultarUno<Fila>(
       'SELECT * FROM liquidaciones WHERE feriante_id = ? AND fecha = ?::date', ferianteId, fecha);
@@ -136,7 +136,7 @@ export async function marcarPagado(ferianteId: string, fecha = hoy()) {
 export async function confirmarRecepcion(ferianteId: string, fecha = hoy()) {
   const registro = await consultarUno<Fila>(
     'SELECT * FROM liquidaciones WHERE feriante_id = ? AND fecha = ?::date', ferianteId, fecha);
-  if (!registro?.pagado_at) throw new Error('Todavía no está marcado como pagado.');
+  if (!registro?.pagado_at) throw new ErrorNegocio(409, 'Todavía no está marcado como pagado.');
 
   await ejecutar('UPDATE liquidaciones SET confirmado_at = ? WHERE id = ?', ahora(), registro.id);
   await registrarEvento('liquidacion', ferianteId, 'confirmado', { fecha });

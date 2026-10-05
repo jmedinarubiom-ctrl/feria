@@ -13,7 +13,8 @@
         "UIBackgroundModes": [
           "remote-notification"
         ]
-      }
+      },
+      "usesAppleSignIn": true
     },
     "android": {
       "adaptiveIcon": {
@@ -55,7 +56,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Feria usa tu ubicación mientras llevás un pedido, para que el cliente y la operación sepan por dónde vas."
+          "locationWhenInUsePermission": "Feria usa tu ubicación mientras llevas un pedido, para que el cliente y la operación sepan por dónde vas."
         }
       ],
       [
@@ -64,7 +65,8 @@
           "photosPermission": "Feria necesita tus fotos para cargar la imagen de un producto del catálogo.",
           "cameraPermission": "Feria usa la cámara para sacarle la foto a un producto del catálogo."
         }
-      ]
+      ],
+      "expo-apple-authentication"
     ],
     "scheme": "feria",
     "notification": {

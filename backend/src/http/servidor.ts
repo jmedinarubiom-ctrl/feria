@@ -9,7 +9,7 @@ import { abrirDB, cerrarDB, consultar, consultarUno, ejecutar, nombreMotor, type
 import { sembrar, FERIA_ID } from '../db/semilla.ts';
 import {
   crearPedido, aceptarOferta, rechazarOferta, liberarSubPedido, marcarListo, tick,
-  cotizar, confirmarPago, OfertaNoDisponible, PedidoMuyChico,
+  cotizar, OfertaNoDisponible, PedidoMuyChico,
 } from '../dominio/despacho.ts';
 import {
   aceptarViaje, completarParada, registrarUbicacion, ViajeNoDisponible,
@@ -21,14 +21,16 @@ import {
 import {
   calcularLiquidacion, liquidacionesDelDia, marcarPagado, confirmarRecepcion, hoy,
 } from '../dominio/liquidaciones.ts';
-import { TransicionInvalida } from '../dominio/estados.ts';
+import { ErrorNegocio, TransicionInvalida } from '../dominio/estados.ts';
 import { bus } from '../realtime/bus.ts';
 import { leRegistra } from '../realtime/filtro.ts';
 import {
   pedirCodigo, crearSesion, verificarToken, cerrarSesion, cerrarTodas, sesionesDe,
-  codigoParaAlguien, ErrorAuth, type Identidad,
+  codigoParaAlguien, pedirCodigoPorCorreo, crearSesionPorCorreo, crearSesionExterna,
+  ErrorAuth, type Identidad,
 } from '../dominio/auth.ts';
-import { firmaValida, traducirPedido } from '../shopify/webhook.ts';
+import { externosDisponibles, verificarTokenExterno } from '../dominio/externo.ts';
+import { proveedorCorreo } from '../correo.ts';
 import { proveedorSms } from '../sms.ts';
 import { iniciarNotificaciones } from '../realtime/push.ts';
 import {
@@ -40,8 +42,13 @@ import {
   catalogoCompleto, actualizarProducto, crearProducto, historialDe, ErrorCatalogo,
 } from '../dominio/catalogo.ts';
 import {
-  cancelarPedido, reembolsosPendientes, ErrorCancelacion,
+  cancelarPedido, reembolsosPendientes, reintentarReembolso, anotarReembolsoManual,
+  ErrorCancelacion,
 } from '../dominio/cancelacion.ts';
+import {
+  crearFeriante, actualizarFeriante, crearRepartidor, actualizarRepartidor,
+  postular, solicitudDe, guardarPerfilCliente,
+} from '../dominio/gente.ts';
 import { estadoFeria, horarioActual, FeriaCerrada } from '../dominio/horario.ts';
 import {
   guardarFoto, leerFoto, desdeBase64, MAX_FOTO, ErrorArchivo,
@@ -82,8 +89,15 @@ function resolver(metodo: string, camino: string) {
     let calza = true;
     for (let i = 0; i < r.partes.length; i++) {
       const patron = r.partes[i];
-      if (patron.startsWith(':')) params[patron.slice(1)] = decodeURIComponent(partes[i]);
-      else if (patron !== partes[i]) { calza = false; break; }
+      if (patron.startsWith(':')) {
+        // Un `%` suelto hace lanzar a decodeURIComponent. Eso es una
+        // petición mal escrita, no un error del servidor.
+        try {
+          params[patron.slice(1)] = decodeURIComponent(partes[i]);
+        } catch {
+          throw new ErrorHttp(400, 'La dirección está mal escrita.');
+        }
+      } else if (patron !== partes[i]) { calza = false; break; }
     }
     if (calza) return { handler: r.handler, params, maxCuerpo: r.maxCuerpo };
   }
@@ -135,33 +149,131 @@ async function identidad(c: Ctx): Promise<Identidad> {
   return c.identidad;
 }
 
+const PLURAL: Record<string, string> = {
+  feriante: 'feriantes', repartidor: 'repartidores', operador: 'la operación', cliente: 'clientes',
+};
+
 /** Exige un rol concreto y devuelve el id de quien hizo la petición. */
 async function actor(c: Ctx, esperado: string): Promise<string> {
   const yo = await identidad(c);
   if (yo.rol !== esperado) {
-    throw new ErrorHttp(403, `Esta acción es solo para ${esperado}es.`);
+    throw new ErrorHttp(403, `Esta acción es solo para ${PLURAL[esperado] ?? esperado}.`);
   }
   return yo.actorId;
 }
 
 /** `?dia=YYYY-MM-DD`, o hoy. Una fecha inventada no llega a la base. */
 function diaPedido(c: Ctx): string {
-  const dia = c.consulta.get('dia');
-  if (!dia) return hoy();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) throw new ErrorHttp(422, 'Fecha inválida.');
-  return dia;
+  return fechaValida(c.consulta.get('dia')) ?? hoy();
+}
+
+/** Lo mismo para una fecha que viene en el cuerpo. `undefined` es «hoy». */
+function fechaValida(valor: unknown): string | undefined {
+  if (valor == null || valor === '') return undefined;
+  if (typeof valor !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(valor)
+      || Number.isNaN(Date.parse(valor))) {
+    throw new ErrorHttp(422, 'Fecha inválida.');
+  }
+  return valor;
 }
 
 // ============================================================
 // Sesión
 // ============================================================
 
+/**
+ * El servidor de desarrollo está abierto a internet (`./feria.sh`).
+ *
+ * En desarrollo el código de ingreso se devuelve en la respuesta y
+ * hay rutas `/dev/` que confirman pagos sin cobrar. Con el backend
+ * solo en tu red eso es cómodo; detrás de un túnel público significa
+ * que cualquiera que encuentre la dirección entra como operador
+ * —basta pedir el código de tu teléfono— y se marca pedidos como
+ * pagados. Con esta marca, esos atajos quedan solo para quien llega
+ * desde el mismo computador.
+ */
+const EXPUESTA = process.env.FERIA_EXPUESTA === '1';
+
+/** La petición viene de este computador, no a través del túnel. */
+function esLocal(req: IncomingMessage): boolean {
+  if (req.headers['x-forwarded-for'] || req.headers['x-forwarded-host']) return false;
+  const ip = req.socket.remoteAddress ?? '';
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
+
+/** Las rutas `/dev/` no existen en producción ni para quien llega por el túnel. */
+function soloDesarrollo(c: Ctx): void {
+  if (process.env.NODE_ENV === 'production' || (EXPUESTA && !esLocal(c.req))) {
+    throw new ErrorHttp(404, 'Ruta no encontrada.');
+  }
+}
+
 /** Paso 1: el teléfono recibe un código de 6 dígitos. */
-POST('/auth/codigo', (c) => pedirCodigo(c.cuerpo?.telefono));
+POST('/auth/codigo', (c) => {
+  frenarCodigos(deQuien(c.req));
+  const opciones = { ocultarCodigo: EXPUESTA && !esLocal(c.req) };
+  // Con `correo` el código va al correo: es el ingreso del
+  // comprador que no usa su teléfono. Solo da cuenta de cliente.
+  return c.cuerpo?.correo
+    ? pedirCodigoPorCorreo(c.cuerpo.correo, opciones)
+    : pedirCodigo(c.cuerpo?.telefono, opciones);
+});
+
+/**
+ * Con qué se puede entrar. La app muestra solo lo que funciona: un
+ * botón de Google que contesta «no disponible» es peor que no
+ * tenerlo.
+ */
+GET('/auth/metodos', async () => {
+  const produccion = process.env.NODE_ENV === 'production';
+  return {
+    sms: !produccion || proveedorSms() !== 'consola',
+    correo: !produccion || proveedorCorreo() !== 'consola',
+    ...externosDisponibles(),
+  };
+});
+
+/** Entrar con Google o con Apple. Solo da cuenta de cliente. */
+POST('/auth/externo', async (c) => {
+  frenarCodigos(deQuien(c.req));
+  const quien = await verificarTokenExterno(
+    c.cuerpo?.proveedor, c.cuerpo?.idToken, c.cuerpo?.nombre);
+  const s = await crearSesionExterna(quien, c.cuerpo?.dispositivo);
+  return {
+    token: s.token, rol: s.rol, actorId: s.actorId, nombre: s.nombre, expiraAt: s.expiraAt,
+  };
+});
+
+/**
+ * Tope de códigos por IP.
+ *
+ * Ahora cualquier celular chileno recibe un código, y cada uno es
+ * un SMS que se paga. El tope por teléfono no alcanza: alguien
+ * puede pedir códigos para mil números distintos y la cuenta llega
+ * igual. Es holgado a propósito —las compañías ponen a mucha gente
+ * detrás de la misma IP— pero corta una máquina pidiendo sin parar.
+ */
+const CODIGOS_POR_HORA = Number(process.env.CODIGOS_POR_HORA_POR_IP ?? 30);
+const pedidosDeCodigo = new Map<string, number[]>();
+
+function frenarCodigos(ip: string): void {
+  const hace1h = Date.now() - 3_600_000;
+  const recientes = (pedidosDeCodigo.get(ip) ?? []).filter((t) => t > hace1h);
+  if (recientes.length >= CODIGOS_POR_HORA) {
+    throw new ErrorHttp(429, 'Se pidieron demasiados códigos desde esta conexión. Prueba más tarde.');
+  }
+  recientes.push(Date.now());
+  pedidosDeCodigo.set(ip, recientes);
+  if (pedidosDeCodigo.size > 5000) {
+    for (const [k, v] of pedidosDeCodigo) if (v.every((t) => t <= hace1h)) pedidosDeCodigo.delete(k);
+  }
+}
 
 /** Paso 2: el código se canjea por una sesión larga. */
 POST('/auth/sesion', async (c) => {
-  const s = await crearSesion(c.cuerpo?.telefono, c.cuerpo?.codigo, c.cuerpo?.dispositivo);
+  const s = c.cuerpo?.correo
+    ? await crearSesionPorCorreo(c.cuerpo.correo, c.cuerpo?.codigo, c.cuerpo?.dispositivo)
+    : await crearSesion(c.cuerpo?.telefono, c.cuerpo?.codigo, c.cuerpo?.dispositivo);
   return {
     token: s.token, rol: s.rol, actorId: s.actorId, nombre: s.nombre, expiraAt: s.expiraAt,
   };
@@ -170,12 +282,45 @@ POST('/auth/sesion', async (c) => {
 GET('/auth/yo', async (c) => {
   const yo = await identidad(c);
   const tabla = yo.rol === 'feriante' ? 'feriantes'
-    : yo.rol === 'repartidor' ? 'repartidores' : 'operadores';
+    : yo.rol === 'repartidor' ? 'repartidores'
+    : yo.rol === 'cliente' ? 'clientes' : 'operadores';
+  const perfil = await consultarUno<Fila>(`SELECT * FROM ${tabla} WHERE id = ?`, yo.actorId);
   return {
     ...yo,
-    perfil: await consultarUno(`SELECT * FROM ${tabla} WHERE id = ?`, yo.actorId),
+    perfil,
     sesiones: await sesionesDe(yo.actorId),
+    // Si pidió ser feriante o repartidor, en qué quedó.
+    ...(yo.rol === 'cliente'
+      ? { solicitud: perfil!.telefono ? await solicitudDe(perfil!.telefono) : null } : {}),
   };
+});
+
+// ============================================================
+// Cliente
+// ============================================================
+
+POST('/cliente/perfil', async (c) =>
+  guardarPerfilCliente(await actor(c, 'cliente'), c.cuerpo));
+
+/** Sus pedidos, del más nuevo al más viejo. */
+GET('/cliente/pedidos', async (c) => {
+  const id = await actor(c, 'cliente');
+  const filas = await consultar<Fila>(
+    'SELECT id FROM pedidos WHERE cliente_id = ? ORDER BY creado_at DESC LIMIT 30', id);
+  return { pedidos: filas.map((f) => f.id) };
+});
+
+/** Pide ser feriante o repartidor. Lo aprueba el operador. */
+POST('/cliente/postular', async (c) => {
+  const id = await actor(c, 'cliente');
+  const yo = await consultarUno<Fila>('SELECT telefono FROM clientes WHERE id = ?', id);
+  // A un feriante o repartidor hay que poder llamarlo, y el número
+  // tiene que estar confirmado: eso solo lo da el ingreso por SMS.
+  if (!yo?.telefono) {
+    throw new ErrorHttp(409,
+      'Para vender o repartir hay que entrar con tu teléfono. Cierra sesión y entra con tu número.');
+  }
+  return postular(yo.telefono, c.cuerpo, FERIA_ID);
 });
 
 POST('/auth/salir', async (c) => {
@@ -198,8 +343,6 @@ GET('/salud', async () => ({
   ok: true,
   motor: nombreMotor(),
   sms: proveedorSms(),
-  // Decía 'flow' escrito a mano, de antes de que hubiera dos
-  // pasarelas. Mentía sobre cuál está cobrando de verdad.
   pagos: pasarela()?.nombre ?? 'sin configurar',
   ts: new Date().toISOString(),
 }));
@@ -217,32 +360,91 @@ GET('/catalogo', async () => {
   const rubros = await consultar<Fila>('SELECT * FROM rubros ORDER BY nombre');
   return Promise.all(rubros.map(async (r) => ({
     ...r,
+    // Columnas con nombre, no `SELECT *`: esta ruta es pública y la
+    // tabla tiene `precio_costo`. Con el asterisco cualquiera que
+    // abriera el catálogo veía cuánto se le paga a cada feriante y,
+    // restando, el margen de cada producto.
     productos: await consultar(
-      'SELECT * FROM productos WHERE rubro_id = ? AND activo ORDER BY nombre', r.id),
+      `SELECT id, rubro_id, nombre, formato, precio_venta, imagen_url
+         FROM productos WHERE rubro_id = ? AND activo ORDER BY nombre`, r.id),
   })));
 });
 
 /**
- * Alta directa de pedido.
+ * Alta de pedido desde la app del cliente.
  *
- * En producción los pedidos entran por el webhook de Shopify, ya
- * pagados; esta ruta es para el panel del operador. Abierta en
- * desarrollo para poder probar desde la app sin pasar por la
- * pasarela.
+ * El cliente entra con su teléfono, igual que todos: el pedido
+ * queda a su nombre y con un número que de verdad es suyo, que es
+ * al que va a llamar el repartidor.
+ *
+ * El pedido nace en PENDIENTE_PAGO y no se le ofrece a nadie hasta
+ * que la pasarela confirma el cobro.
+ *
+ * Los campos se copian de a uno, nunca `...c.cuerpo`: lo que no
+ * está en esta lista no llega al dominio, por más que el cliente lo
+ * mande.
  */
 POST('/pedidos', async (c) => {
-  if (process.env.NODE_ENV === 'production') await actor(c, 'operador');
-  return crearPedido({ feriaId: FERIA_ID, ...c.cuerpo });
+  const clienteId = await actor(c, 'cliente');
+  const cliente = await consultarUno<Fila>('SELECT * FROM clientes WHERE id = ?', clienteId);
+  const b = c.cuerpo;
+  const email = typeof b.clienteEmail === 'string' ? b.clienteEmail : null;
+
+  const r = await crearPedido({
+    feriaId: FERIA_ID,
+    clienteId,
+    clienteNombre: b.clienteNombre,
+    // Puede dejar otro número de contacto —pide para la mamá—; si
+    // no, el de su cuenta, que está confirmado.
+    clienteTelefono: typeof b.clienteTelefono === 'string' && b.clienteTelefono.trim()
+      ? b.clienteTelefono : cliente!.telefono,
+    clienteEmail: email,
+    direccion: b.direccion,
+    lat: Number(b.lat),
+    lng: Number(b.lng),
+    notas: typeof b.notas === 'string' ? b.notas : null,
+    items: b.items,
+  });
+  // Lo que usó queda guardado para la próxima compra.
+  await guardarPerfilCliente(clienteId, {
+    nombre: b.clienteNombre, email: email ?? cliente!.email, direccion: b.direccion,
+  });
+  return r;
 });
 
 /** Lo que necesita el carro para mostrar el total antes de cobrar. */
 GET('/cotizar/:total', async (c) => cotizar(Number(c.params.total) || 0));
 
+/**
+ * El pedido, para el seguimiento del cliente y para el panel.
+ *
+ * Lo ve el operador y el cliente que lo hizo, nadie más. Por número
+ * (#1042) solo busca el operador.
+ */
 GET('/pedidos/:id', async (c) => {
-  const p = await pedidoCompleto(c.params.id) ?? await pedidoPorNumero(c.params.id);
-  if (!p) throw new ErrorHttp(404, 'Pedido no encontrado.');
-  return p;
+  const yo = await identidad(c);
+  const operador = yo.rol === 'operador';
+  const p = await pedidoCompleto(c.params.id)
+    ?? (operador ? await pedidoPorNumero(c.params.id) : null);
+  // Mismo 404 para «no existe» y «no es tuyo»: no se confirma que
+  // un id ajeno es de un pedido real.
+  if (!p || (!operador && !(yo.rol === 'cliente' && p.cliente_id === yo.actorId))) {
+    throw new ErrorHttp(404, 'Pedido no encontrado.');
+  }
+  return operador ? p : sinCostos(p);
 });
+
+/** Lo que ve el cliente: su pedido, sin la plata interna del negocio. */
+function sinCostos(p: Fila): Fila {
+  return {
+    ...p,
+    subPedidos: p.subPedidos.map(({ monto_feriante, compensado, ...s }: Fila) => ({
+      ...s,
+      items: s.items.map(({ precio_costo, ...i }: Fila) => i),
+    })),
+    viaje: p.viaje ? (({ tarifa, ...v }: Fila) => v)(p.viaje) : null,
+  };
+}
 
 async function pedidoPorNumero(valor: string) {
   const n = Number(valor);
@@ -272,31 +474,16 @@ GET('/pagos/pedido/:id', async (c) => ({ pagos: await pagosDe(c.params.id) }));
 POST('/pagos/:pagoId/revisar', async (c) => revisarCobro(c.params.pagoId));
 
 /**
- * Flow avisa acá cuando termina un pago.
- *
- * Se responde 200 pase lo que pase: si Flow recibe un error sigue
- * reintentando durante horas. El contenido del aviso no se cree —
- * `confirmarDesdePasarela` le vuelve a preguntar a Flow.
- */
-POST('/webhooks/flow/confirmacion', async (c) => {
-  try {
-    await confirmarDesdePasarela(String(c.cuerpo?.token ?? ''));
-  } catch (e) {
-    console.error('[flow] confirmación fallida', e);
-  }
-  return { ok: true };
-});
-
-/**
  * Mercado Pago avisa acá.
  *
  * Manda el id en la URL o en el cuerpo según la antigüedad de la
  * integración, y avisa de cosas que no son pagos. `pagoAvisado`
  * normaliza todo eso y devuelve null para lo que no nos toca.
  *
- * Igual que con Flow: se responde 200 siempre —MP reintenta durante
- * días y termina deshabilitando el webhook— y el contenido del
- * aviso no se cree, se vuelve a preguntar.
+ * Se responde 200 siempre —MP reintenta durante días y termina
+ * deshabilitando el webhook— y el contenido del aviso no se cree:
+ * llega por HTTP abierto y cualquiera puede inventarlo, así que se
+ * le vuelve a preguntar a Mercado Pago.
  */
 POST('/webhooks/mercadopago', async (c) => {
   const pago = pagoAvisado(c.consulta, c.cuerpo);
@@ -315,43 +502,39 @@ GET('/webhooks/mercadopago', async () => ({ ok: true }));
 /**
  * Adonde vuelve el cliente después de pagar.
  *
- * Flow trae de vuelta al navegador, no a la app, así que esta página
- * lo devuelve a la app por deep link.
+ * La pasarela trae de vuelta al navegador, no a la app, así que
+ * esta página lo devuelve a la app por deep link.
  */
-GET('/pagos/retorno', async () => ({ ok: true, volverA: 'feria://pago' }));
+GET('/pagos/retorno', async () => new RespuestaCruda(PAGINA_RETORNO, 'text/html; charset=utf-8', 'no-store'));
+
+// Antes esto devolvía JSON: después de pagar, el cliente quedaba
+// mirando `{"ok":true,"volverA":"feria://pago"}` en el navegador sin
+// saber si había pagado ni cómo volver.
+const PAGINA_RETORNO = `<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feria — pago recibido</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #FAFBFC; color: #1F2933;
+         display: flex; min-height: 100vh; margin: 0; align-items: center; justify-content: center; }
+  main { text-align: center; padding: 32px; max-width: 360px; }
+  h1 { font-size: 22px; margin: 0 0 8px; }
+  p { color: #52606D; line-height: 1.5; }
+  a { display: inline-block; margin-top: 16px; padding: 14px 24px; border-radius: 12px;
+      background: #8B2838; color: #fff; text-decoration: none; font-weight: 700; }
+</style></head>
+<body><main>
+  <h1>Listo</h1>
+  <p>Ya puedes volver a la app: ahí vas a ver cómo va tu pedido.</p>
+  <a href="feria://pago">Volver a la app</a>
+</main>
+<script>setTimeout(function () { location.href = 'feria://pago'; }, 400);</script>
+</body></html>`;
 
 /** Confirmación sin pasarela, solo para desarrollo. */
 POST('/dev/pagar/:pagoId', async (c) => {
-  if (process.env.NODE_ENV === 'production') throw new ErrorHttp(404, 'Ruta no encontrada.');
+  soloDesarrollo(c);
   return { pagado: await confirmarEnDesarrollo(c.params.pagoId) };
-});
-
-// ============================================================
-// Webhook de Shopify
-// ============================================================
-
-/**
- * Shopify avisa acá cuando un pedido queda pagado. Se responde 200
- * lo antes posible: si el endpoint tarda, Shopify reintenta y
- * llegan pedidos duplicados (por eso además `crearPedido` es
- * idempotente por `shopify_order_id`).
- */
-POST('/webhooks/shopify/pedido-pagado', async (c) => {
-  const secreto = process.env.SHOPIFY_WEBHOOK_SECRET;
-  if (!secreto) throw new ErrorHttp(500, 'Falta SHOPIFY_WEBHOOK_SECRET.');
-  if (!firmaValida(c.crudo, c.req.headers['x-shopify-hmac-sha256'] as string, secreto)) {
-    throw new ErrorHttp(401, 'Firma HMAC inválida.');
-  }
-  // Shopify solo avisa de pedidos ya pagados, así que se confirma
-  // en el acto: el cobro ocurrió en su checkout.
-  const r = await crearPedido({
-    ...await traducirPedido(c.cuerpo, FERIA_ID),
-    // El cobro ocurrió en el checkout de Shopify: si acá se rechaza
-    // por horario, el cliente pagó y se queda sin pedido.
-    yaCobrado: true,
-  });
-  await confirmarPago(r.pedidoId);
-  return r;
 });
 
 // ============================================================
@@ -398,7 +581,7 @@ POST('/subpedidos/:id/listo', async (c) => {
 });
 
 POST('/feriante/liquidacion/confirmar', async (c) =>
-  confirmarRecepcion(await actor(c, 'feriante'), c.cuerpo?.fecha));
+  confirmarRecepcion(await actor(c, 'feriante'), fechaValida(c.cuerpo?.fecha)));
 
 // ============================================================
 // Repartidor
@@ -494,21 +677,42 @@ POST('/operador/codigo-para/:actorId', async (c) => {
 GET('/operador/gente', async (c) => {
   await actor(c, 'operador');
   const feriantes = await consultar(
-    `SELECT f.id, f.nombre, f.puesto, f.telefono, f.conectado,
+    `SELECT f.id, f.nombre, f.puesto, f.telefono, f.conectado, f.activo, f.pendiente,
             COALESCE(string_agg(r.nombre, ', ' ORDER BY r.nombre), '—') AS rubros,
+            COALESCE(array_agg(r.id ORDER BY r.nombre) FILTER (WHERE r.id IS NOT NULL), '{}')
+              AS rubro_ids,
             (SELECT COUNT(*)::int FROM sub_pedidos s
               WHERE s.feriante_id = f.id AND s.estado NOT IN ('ENTREGADO','CANCELADO'))
               AS en_curso
        FROM feriantes f
        LEFT JOIN feriante_rubros fr ON fr.feriante_id = f.id
        LEFT JOIN rubros r ON r.id = fr.rubro_id
-      GROUP BY f.id ORDER BY f.conectado DESC, f.nombre`);
+      GROUP BY f.id ORDER BY f.pendiente DESC, f.activo DESC, f.conectado DESC, f.nombre`);
   const repartidores = await consultar(
-    `SELECT id, nombre, vehiculo, telefono, conectado,
+    `SELECT id, nombre, vehiculo, telefono, conectado, activo, pendiente,
             (SELECT COUNT(*)::int FROM viajes v
               WHERE v.repartidor_id = repartidores.id AND v.estado = 'EN_RUTA') AS en_curso
-       FROM repartidores ORDER BY conectado DESC, nombre`);
-  return { feriantes, repartidores };
+       FROM repartidores ORDER BY pendiente DESC, activo DESC, conectado DESC, nombre`);
+  const rubros = await consultar('SELECT id, nombre FROM rubros ORDER BY nombre');
+  return { feriantes, repartidores, rubros };
+});
+
+/** Alta y cambios de la gente: los feriantes y repartidores de verdad. */
+POST('/operador/feriantes', async (c) => {
+  await actor(c, 'operador');
+  return crearFeriante(c.cuerpo, FERIA_ID);
+});
+POST('/operador/feriantes/:id', async (c) => {
+  await actor(c, 'operador');
+  return actualizarFeriante(c.params.id, c.cuerpo);
+});
+POST('/operador/repartidores', async (c) => {
+  await actor(c, 'operador');
+  return crearRepartidor(c.cuerpo);
+});
+POST('/operador/repartidores/:id', async (c) => {
+  await actor(c, 'operador');
+  return actualizarRepartidor(c.params.id, c.cuerpo);
 });
 
 /**
@@ -543,7 +747,7 @@ POST('/operador/autogestion/:id/listo', async (c) => {
 
 POST('/operador/liquidaciones/:ferianteId/pagar', async (c) => {
   await actor(c, 'operador');
-  return marcarPagado(c.params.ferianteId, c.cuerpo?.fecha);
+  return marcarPagado(c.params.ferianteId, fechaValida(c.cuerpo?.fecha));
 });
 
 // ---------- Catálogo ----------
@@ -659,6 +863,15 @@ GET('/operador/reembolsos-pendientes', async (c) => {
   return { pendientes: await reembolsosPendientes() };
 });
 
+POST('/operador/reembolsos/:pagoId/reintentar', async (c) => {
+  await actor(c, 'operador');
+  return reintentarReembolso(c.params.pagoId);
+});
+
+POST('/operador/reembolsos/:pagoId/hecho', async (c) => {
+  return anotarReembolsoManual(c.params.pagoId, await actor(c, 'operador'));
+});
+
 GET('/operador/eventos/:entidadId', async (c) => {
   await actor(c, 'operador');
   return consultar('SELECT * FROM eventos WHERE entidad_id = ? ORDER BY id', c.params.entidadId);
@@ -676,10 +889,8 @@ GET('/operador/eventos/:entidadId', async (c) => {
  * en producción: sin esto sería una forma trivial de sabotear el
  * despacho de la feria entera.
  */
-POST('/dev/vencer-ofertas', async () => {
-  if (process.env.NODE_ENV === 'production') {
-    throw new ErrorHttp(404, 'Ruta no encontrada.');
-  }
+POST('/dev/vencer-ofertas', async (c) => {
+  soloDesarrollo(c);
   const r = await ejecutar(
     `UPDATE ofertas SET expira_at = now() - interval '1 second' WHERE respuesta IS NULL`);
   await tick();
@@ -714,12 +925,14 @@ function leerCuerpo(req: IncomingMessage, max = MAX_CUERPO): Promise<Buffer> {
 async function manejar(req: IncomingMessage, res: ServerResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers',
-    'content-type, authorization, x-shopify-hmac-sha256');
+    'content-type, authorization');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  // Que el navegador no adivine tipos: lo que se sube como foto se
+  // sirve como foto. Y que nadie meta el panel dentro de otra página.
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
   if (req.method === 'OPTIONS') return res.writeHead(204).end();
-
-  const url = new URL(req.url ?? '/', 'http://localhost');
-  const camino = url.pathname;
 
   // El freno va antes de resolver la ruta: una avalancha contra una
   // ruta inexistente cuesta lo mismo que contra una real.
@@ -730,21 +943,33 @@ async function manejar(req: IncomingMessage, res: ServerResponse) {
       error: `Demasiadas peticiones. Prueba de nuevo en ${espera} segundos.`,
     }));
   }
-  const encontrada = resolver(req.method ?? 'GET', camino);
-  if (!encontrada) {
-    res.writeHead(404, { 'content-type': 'application/json' });
-    return res.end(JSON.stringify({ error: 'Ruta no encontrada.' }));
-  }
 
+  let camino = req.url ?? '/';
+  // Todo lo que puede lanzar va DENTRO del try, incluido leer la
+  // dirección. Antes la ruta se resolvía afuera: una sola petición
+  // a `/pedidos/%E0%A4%A` lanzaba fuera de todo manejador, y un
+  // rechazo sin atrapar termina el proceso. Cualquiera podía botar
+  // la feria entera con una URL.
   try {
+    let url: URL;
+    try {
+      url = new URL(req.url ?? '/', 'http://localhost');
+    } catch {
+      throw new ErrorHttp(400, 'La dirección está mal escrita.');
+    }
+    camino = url.pathname;
+
+    const encontrada = resolver(req.method ?? 'GET', camino);
+    if (!encontrada) throw new ErrorHttp(404, 'Ruta no encontrada.');
+
     const crudo = req.method === 'POST'
       ? await leerCuerpo(req, encontrada.maxCuerpo) : Buffer.alloc(0);
-    const tipo = String(req.headers['content-type'] ?? '');
-    // Flow confirma con application/x-www-form-urlencoded, no JSON.
-    const cuerpo = !crudo.length ? {}
-      : tipo.includes('application/x-www-form-urlencoded')
-        ? Object.fromEntries(new URLSearchParams(crudo.toString('utf8')))
-        : JSON.parse(crudo.toString('utf8'));
+    const cuerpo = !crudo.length ? {} : JSON.parse(crudo.toString('utf8'));
+    // `null`, un número o una lista son JSON válido pero no son un
+    // cuerpo: los handlers leen `c.cuerpo.algo` sin preguntar.
+    if (cuerpo === null || typeof cuerpo !== 'object' || Array.isArray(cuerpo)) {
+      throw new ErrorHttp(400, 'El cuerpo tiene que ser un objeto JSON.');
+    }
     const salida = await encontrada.handler({
       params: encontrada.params, consulta: url.searchParams, cuerpo, req, crudo,
     });
@@ -762,6 +987,7 @@ async function manejar(req: IncomingMessage, res: ServerResponse) {
       e instanceof ErrorHttp ? e.codigo
       : e instanceof OfertaNoDisponible || e instanceof ViajeNoDisponible ? 409
       : e instanceof TransicionInvalida ? 422
+      : e instanceof ErrorNegocio ? e.codigo
       : e instanceof ErrorPago ? e.codigo
       : e instanceof ErrorCatalogo ? e.codigo
       : e instanceof ErrorArchivo ? e.codigo
@@ -774,16 +1000,31 @@ async function manejar(req: IncomingMessage, res: ServerResponse) {
     if (codigo === 500) console.error('[error]', camino, e);
     if (res.headersSent) return;
     res.writeHead(codigo, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: e.message ?? 'Error interno.' }));
+    // El detalle de un error interno queda en el registro, no viaja
+    // al cliente: puede traer nombres de tablas o de columnas.
+    res.end(JSON.stringify({
+      error: codigo === 500 ? 'Error interno. Intenta de nuevo.' : (e.message ?? 'Error.'),
+    }));
   }
 }
 
-export async function iniciar(puerto = CONFIG.puerto) {
-  await abrirDB();
+/** Una pausa que no mantiene vivo el proceso por sí sola. */
+const dormir = (ms: number) => new Promise<void>((r) => { setTimeout(r, ms).unref(); });
+
+export async function iniciar(puerto = CONFIG.puerto, opciones: { memoria?: boolean } = {}) {
+  await abrirDB(opciones);
   await sembrar();
   iniciarNotificaciones();
 
-  const servidor = createServer((req, res) => { void manejar(req, res); });
+  const servidor = createServer((req, res) => {
+    // Última red: pase lo que pase adentro, una petición no puede
+    // terminar el proceso.
+    manejar(req, res).catch((e) => {
+      console.error('[error] sin atrapar', req.url, e);
+      if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Error interno. Intenta de nuevo.' }));
+    });
+  });
   const wss = new WebSocketServer({ server: servidor, path: '/ws' });
 
   // Cada conexión declara qué es (?rol=feriante&id=f-jose) y solo
@@ -791,14 +1032,31 @@ export async function iniciar(puerto = CONFIG.puerto) {
   // recibiría las ofertas de los otros ocho puestos.
   const clientes = new Map<WebSocket, { rol: string; id: string }>();
 
+  //
+  // Quién es lo dice el token, no la URL. Antes bastaba conectarse
+  // con `?rol=operador` para recibir el movimiento de toda la feria,
+  // o con el id de otro feriante para ver sus ofertas. El cliente
+  // sigue sin token: su llave es el id de su pedido.
   wss.on('connection', (ws, req) => {
-    const url = new URL(req.url ?? '/ws', 'http://localhost');
-    clientes.set(ws, {
-      rol: url.searchParams.get('rol') ?? 'cliente',
-      id: url.searchParams.get('id') ?? '',
-    });
     ws.on('close', () => clientes.delete(ws));
     ws.on('error', () => clientes.delete(ws));
+
+    let url: URL;
+    try {
+      url = new URL(req.url ?? '/ws', 'http://localhost');
+    } catch {
+      return ws.close(1008, 'dirección inválida');
+    }
+    const rol = url.searchParams.get('rol') ?? 'cliente';
+    if (rol === 'cliente') {
+      clientes.set(ws, { rol, id: url.searchParams.get('id') ?? '' });
+      return;
+    }
+    verificarToken(url.searchParams.get('token') ?? undefined)
+      .then((yo) => {
+        if (ws.readyState === ws.OPEN) clientes.set(ws, { rol: yo.rol, id: yo.actorId });
+      })
+      .catch(() => ws.close(1008, 'sesión inválida'));
   });
 
   bus.on('mensaje', (m) => {
@@ -818,7 +1076,7 @@ export async function iniciar(puerto = CONFIG.puerto) {
       } catch (e) {
         console.error('[tick]', e);
       }
-      await new Promise((r) => setTimeout(r, CONFIG.intervaloTickMs));
+      await dormir(CONFIG.intervaloTickMs);
     }
   };
   void latir();
@@ -834,7 +1092,7 @@ export async function iniciar(puerto = CONFIG.puerto) {
    */
   const revisarPagos = async () => {
     while (vivo) {
-      await new Promise((r) => setTimeout(r, 8000));
+      await dormir(8000);
       if (!vivo) break;
       try {
         const r = await revisarCobrosAbiertos();
@@ -853,9 +1111,12 @@ export async function iniciar(puerto = CONFIG.puerto) {
   const barrido = setInterval(() => limpiarFrenos(), 60_000);
   barrido.unref();
 
+  // Cerrar el servidor detiene también los dos relojes.
+  servidor.on('close', () => { vivo = false; wss.close(); });
+
   await new Promise<void>((r) => servidor.listen(puerto, r));
   console.log(`Feria backend en http://localhost:${puerto}  ·  base: ${nombreMotor()}`);
-  console.log(`WebSocket en ws://localhost:${puerto}/ws?rol=feriante&id=f-jose`);
+  console.log(`WebSocket en ws://localhost:${puerto}/ws`);
   console.log(`Panel en http://localhost:${puerto}/admin  ·  freno: ${LIMITE_POR_MINUTO}/min por IP`);
 
   /** Cierre ordenado: el orquestador manda SIGTERM al desplegar. */

@@ -72,7 +72,8 @@ export const TRANSICIONES_PEDIDO: Transiciones<EstadoPedido> = {
   LISTO_PARA_RETIRO: ['EN_RUTA', 'CANCELADO'],
   EN_RUTA: ['ENTREGADO', 'CANCELADO'],
   ENTREGADO: [],
-  EXPIRADO: [],
+  // Un cobro que estaba abierto y se pagó tarde revive el pedido.
+  EXPIRADO: ['PAGADO'],
   CANCELADO: [],
 };
 
@@ -97,6 +98,23 @@ export const TRANSICIONES_VIAJE: Transiciones<EstadoViaje> = {
   ENTREGADO: [],
   CANCELADO: [],
 };
+
+/**
+ * Un error que es culpa de lo que se pidió, no del servidor.
+ *
+ * Lleva su código HTTP. Antes estas situaciones —un producto que no
+ * existe, una parada inventada— lanzaban un `Error` pelado y salían
+ * como 500: el registro se llenaba de «errores internos» que eran
+ * solo peticiones mal hechas, y los de verdad se perdían entre ellos.
+ */
+export class ErrorNegocio extends Error {
+  codigo: number;
+  constructor(codigo: number, msg: string) {
+    super(msg);
+    this.codigo = codigo;
+    this.name = 'ErrorNegocio';
+  }
+}
 
 export class TransicionInvalida extends Error {
   constructor(entidad: string, desde: string, hacia: string) {

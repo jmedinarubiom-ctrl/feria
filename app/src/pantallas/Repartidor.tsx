@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, Linking, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Linking, Platform, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { api, useTablero } from '../api';
 import { useEnviarUbicacion } from '../ubicacion';
@@ -25,7 +25,10 @@ export default function Repartidor({ repartidorId }: { repartidorId: string }) {
   useEnviarUbicacion(!!datos?.viajeActivo);
 
   if (cargando) return <Cargando />;
-  if (error) return <Pantalla><Aviso texto={error} /></Pantalla>;
+  // Con datos en pantalla, una recarga que falla —la señal de la
+  // feria— no los tapa con un error: se sigue mostrando lo último.
+  if (error && !datos) return <Pantalla><Aviso texto={error} /></Pantalla>;
+  if (!datos) return <Cargando />;
 
   const accion = async (fn: () => Promise<unknown>) => {
     setOcupado(true);
@@ -105,7 +108,7 @@ export default function Repartidor({ repartidorId }: { repartidorId: string }) {
   return (
     <Pantalla
       titulo={`Pedido #${viajeActivo.numero}`}
-      subtitulo={`Parada ${Math.min(hechas + 1, paradas.length)} de ${paradas.length} · pagas ${clp(viajeActivo.tarifa)}`}
+      subtitulo={`Parada ${Math.min(hechas + 1, paradas.length)} de ${paradas.length} · ganas ${clp(viajeActivo.tarifa)}`}
       accesorio={<Chip texto={viajeActivo.estado} tono={tonoEstado(viajeActivo.estado)} />}
     >
       {siguiente ? (
@@ -149,8 +152,11 @@ export default function Repartidor({ repartidorId }: { repartidorId: string }) {
               <Boton
                 titulo="Abrir en el mapa"
                 variante="secundario"
-                onPress={() => Linking.openURL(
-                  `https://maps.apple.com/?daddr=${siguiente.lat},${siguiente.lng}`)}
+                // Apple Maps solo existe en iPhone; en Android ese
+                // enlace abría el navegador en vez del mapa.
+                onPress={() => Linking.openURL(Platform.OS === 'ios'
+                  ? `https://maps.apple.com/?daddr=${siguiente.lat},${siguiente.lng}`
+                  : `https://www.google.com/maps/dir/?api=1&destination=${siguiente.lat},${siguiente.lng}`)}
               />
             ) : null}
             <Boton

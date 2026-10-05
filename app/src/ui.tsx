@@ -6,7 +6,7 @@ import {
 
 import { C, E, ELEV, R, T } from './tema';
 import { Manzana } from './Logotipo';
-import { BASE } from './api';
+import { servidor } from './api';
 
 // ============================================================
 // Estructura de pantalla
@@ -325,7 +325,7 @@ export function NoCargo({ error, onReintentar }: { error: string; onReintentar: 
           ? 'Revisa que estés en la misma red que el servidor de la feria.'
           : error}
       </Text>
-      <Text style={[T.micro, { textAlign: 'center', marginTop: E.s }]}>{BASE}</Text>
+      <Text style={[T.micro, { textAlign: 'center', marginTop: E.s }]}>{servidor()}</Text>
       <View style={{ marginTop: E.l, alignSelf: 'stretch' }}>
         <Boton titulo="REINTENTAR" onPress={onReintentar} />
       </View>

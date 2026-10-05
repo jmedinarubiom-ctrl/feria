@@ -2,6 +2,8 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
+import { api } from '../api';
+
 /**
  * Carro y datos del cliente, guardados en el teléfono.
  *
@@ -71,19 +73,46 @@ const escribir = async (clave: string, valor: string): Promise<void> => {
   }
 };
 
-export function ProveedorCliente({ children }: { children: React.ReactNode }) {
+export function ProveedorCliente({ children, telefono }: {
+  children: React.ReactNode;
+  /** El número de la cuenta: ya está confirmado por SMS. */
+  telefono: string;
+}) {
   const [carro, setCarro] = useState<Record<string, number>>({});
   const [perfil, setPerfil] = useState<Perfil>(PERFIL_INICIAL);
   const [misPedidos, setMisPedidos] = useState<string[]>([]);
 
   useEffect(() => {
     void (async () => {
+      // Primero lo guardado en el teléfono, que está al instante y
+      // funciona sin señal; después la cuenta, que es la que vale:
+      // así los datos y los pedidos siguen al cliente si cambia de
+      // teléfono.
       const p = await leer(CLAVE_PERFIL);
-      if (p) setPerfil({ ...PERFIL_INICIAL, ...JSON.parse(p) });
+      const local: Perfil = { ...PERFIL_INICIAL, ...(p ? JSON.parse(p) : {}) };
+      setPerfil({ ...local, telefono: local.telefono || telefono });
       const ped = await leer(CLAVE_PEDIDOS);
       if (ped) setMisPedidos(JSON.parse(ped));
+
+      try {
+        const [yo, mios] = await Promise.all([
+          api('GET', '/auth/yo'), api('GET', '/cliente/pedidos'),
+        ]);
+        const cuenta = yo.perfil ?? {};
+        setPerfil((actual) => ({
+          ...actual,
+          nombre: actual.nombre || cuenta.nombre || '',
+          email: actual.email || cuenta.email || '',
+          direccion: actual.direccion || cuenta.direccion || '',
+          telefono: actual.telefono || cuenta.telefono || telefono,
+        }));
+        setMisPedidos(mios.pedidos);
+        await escribir(CLAVE_PEDIDOS, JSON.stringify(mios.pedidos));
+      } catch {
+        // Sin señal se sigue con lo guardado.
+      }
     })();
-  }, []);
+  }, [telefono]);
 
   const valor = useMemo<Estado>(() => ({
     carro,
@@ -104,6 +133,9 @@ export function ProveedorCliente({ children }: { children: React.ReactNode }) {
     guardarPerfil: async (p) => {
       setPerfil(p);
       await escribir(CLAVE_PERFIL, JSON.stringify(p));
+      void api('POST', '/cliente/perfil', {
+        cuerpo: { nombre: p.nombre, email: p.email, direccion: p.direccion },
+      }).catch(() => {});
     },
     perfilCompleto: !!(perfil.nombre.trim() && perfil.telefono.trim() && perfil.direccion.trim()),
 

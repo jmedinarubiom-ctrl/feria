@@ -95,11 +95,25 @@ services:
         sync: false
       - key: TELEFONO_CONTACTO
         sync: false
-      # Opcionales: sin ellos los códigos de acceso no se mandan por
-      # SMS y el operador los pasa desde el panel.
+      # Twilio manda los códigos de ingreso por SMS. Sin estos tres,
+      # el equipo todavía puede entrar —el operador les dicta el
+      # código desde el panel— pero los CLIENTES no pueden entrar ni
+      # comprar: a ellos el código solo les llega por mensaje.
       - key: TWILIO_ACCOUNT_SID
         sync: false
       - key: TWILIO_AUTH_TOKEN
         sync: false
       - key: TWILIO_FROM
+        sync: false
+      # Ingreso del comprador con código al correo (resend.com). Sin
+      # estas dos, ese ingreso queda apagado.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: CORREO_REMITENTE
+        sync: false
+      # Ingreso del comprador con Google y con Apple. Vacío = sin
+      # ese botón. Ver DESPLEGAR.md.
+      - key: GOOGLE_CLIENT_IDS
+        sync: false
+      - key: APPLE_CLIENT_IDS
         sync: false

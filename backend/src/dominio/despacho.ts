@@ -3,11 +3,12 @@ import {
   ahora, consultar, consultarUno, ejecutar, enTransaccion, id, registrarEvento, type Fila,
 } from '../db/index.ts';
 import {
-  EstadoPedido, EstadoSubPedido, TRANSICIONES_PEDIDO, TRANSICIONES_SUB_PEDIDO, validarTransicion,
+  ErrorNegocio, EstadoPedido, EstadoSubPedido, TRANSICIONES_PEDIDO, TRANSICIONES_SUB_PEDIDO,
+  validarTransicion,
 } from './estados.ts';
 import { publicar } from '../realtime/bus.ts';
-import { crearViaje } from './reparto.ts';
-import { verificarHorario, estadoFeria } from './horario.ts';
+import { crearViaje, sincronizarParadas } from './reparto.ts';
+import { verificarHorario } from './horario.ts';
 import { geocodificar } from './geocodificar.ts';
 
 // ============================================================
@@ -17,8 +18,12 @@ import { geocodificar } from './geocodificar.ts';
 async function cambiarEstadoSubPedido(
   subPedidoId: string, hacia: EstadoSubPedido, extra: Fila = {},
 ): Promise<Fila> {
-  const sub = await consultarUno<Fila>('SELECT * FROM sub_pedidos WHERE id = ?', subPedidoId);
-  if (!sub) throw new Error(`Sub-pedido inexistente: ${subPedidoId}`);
+  // FOR UPDATE: entre leer el estado y escribir el nuevo, otra
+  // transacción no puede cambiarlo. PGlite atiende de a una y nunca
+  // lo notó; Postgres de verdad atiende varias a la vez.
+  const sub = await consultarUno<Fila>(
+    'SELECT * FROM sub_pedidos WHERE id = ? FOR UPDATE', subPedidoId);
+  if (!sub) throw new ErrorNegocio(404, `Sub-pedido inexistente: ${subPedidoId}`);
   validarTransicion('sub_pedido', TRANSICIONES_SUB_PEDIDO, sub.estado, hacia);
 
   const campos = ['estado = ?'];
@@ -41,8 +46,9 @@ async function cambiarEstadoSubPedido(
 async function cambiarEstadoPedido(
   pedidoId: string, hacia: EstadoPedido, extra: Fila = {},
 ): Promise<Fila> {
-  const pedido = await consultarUno<Fila>('SELECT * FROM pedidos WHERE id = ?', pedidoId);
-  if (!pedido) throw new Error(`Pedido inexistente: ${pedidoId}`);
+  const pedido = await consultarUno<Fila>(
+    'SELECT * FROM pedidos WHERE id = ? FOR UPDATE', pedidoId);
+  if (!pedido) throw new ErrorNegocio(404, `Pedido inexistente: ${pedidoId}`);
   if (pedido.estado === hacia) return pedido;
   validarTransicion('pedido', TRANSICIONES_PEDIDO, pedido.estado, hacia);
 
@@ -67,8 +73,9 @@ async function cambiarEstadoPedido(
 export type ItemEntrante = { productoId: string; cantidad: number };
 
 export type PedidoEntrante = {
-  shopifyOrderId?: string | null;
   feriaId: string;
+  /** El cliente que lo pidió, con su sesión. */
+  clienteId?: string | null;
   clienteNombre: string;
   clienteTelefono: string;
   /** Sin esto no hay dónde mandar un reembolso. */
@@ -77,16 +84,6 @@ export type PedidoEntrante = {
   lat: number;
   lng: number;
   notas?: string | null;
-  /** Lo que ya se le cobró de despacho. Si falta, se calcula acá. */
-  costoDespacho?: number;
-  /**
-   * El cobro ya ocurrió afuera (checkout de Shopify).
-   *
-   * Con esto no se aplica el horario: rechazar plata que ya se cobró
-   * deja al cliente sin pedido y sin devolución. Se acepta y queda
-   * anotado para que el operador lo vea.
-   */
-  yaCobrado?: boolean;
   items: ItemEntrante[];
 };
 
@@ -101,7 +98,7 @@ export class PedidoMuyChico extends Error {
  * Cuánto se le cobra de despacho a un carro.
  *
  * Gratis sobre cierto monto: al cliente le conviene agregar
- * mercadería antes que pagar el envío, y a tú te conviene que la
+ * mercadería antes que pagar el envío, y a ti te conviene que la
  * agregue, porque el reparto cuesta lo mismo lleve poco o mucho.
  */
 export function calcularDespacho(totalProductos: number): number {
@@ -133,13 +130,48 @@ export function cotizar(totalProductos: number) {
  * puesto de la feria vende verdura, fruta y pescado a la vez, así
  * que un pedido mixto SIEMPRE requiere varios puestos.
  */
+/**
+ * Revisa lo que llega antes de tocar la base.
+ *
+ * El alta de pedidos es pública —el cliente no tiene cuenta—, así
+ * que acá llega cualquier cosa. Sin esto un cuerpo sin `items`
+ * reventaba con un TypeError y un nombre vacío llegaba hasta el
+ * NOT NULL de la base: los dos salían como «error interno».
+ */
+function validarEntrada(entrada: PedidoEntrante): void {
+  const texto = (v: unknown, campo: string, max: number): void => {
+    if (typeof v !== 'string' || !v.trim()) throw new ErrorNegocio(422, `Falta ${campo}.`);
+    if (v.length > max) throw new ErrorNegocio(422, `${campo} es demasiado largo.`);
+  };
+  texto(entrada.clienteNombre, 'el nombre', 80);
+  texto(entrada.clienteTelefono, 'el teléfono', 30);
+  texto(entrada.direccion, 'la dirección', 200);
+  if (entrada.notas != null && String(entrada.notas).length > 500) {
+    throw new ErrorNegocio(422, 'Las notas son demasiado largas.');
+  }
+  if (entrada.clienteEmail != null && String(entrada.clienteEmail).length > 120) {
+    throw new ErrorNegocio(422, 'El correo es demasiado largo.');
+  }
+  if (!Array.isArray(entrada.items) || entrada.items.length === 0) {
+    throw new ErrorNegocio(422, 'El pedido no tiene items.');
+  }
+  if (entrada.items.length > 100) throw new ErrorNegocio(422, 'El pedido tiene demasiados items.');
+  for (const it of entrada.items) {
+    if (!it || typeof it.productoId !== 'string') {
+      throw new ErrorNegocio(422, 'Hay un item sin producto.');
+    }
+    // El tope evita un total que no entra en un entero de la base.
+    if (!Number.isInteger(it.cantidad) || it.cantidad <= 0 || it.cantidad > 200) {
+      throw new ErrorNegocio(422, `Cantidad inválida para ${it.productoId}`);
+    }
+  }
+}
+
 export async function crearPedido(entrada: PedidoEntrante): Promise<{ pedidoId: string; numero: number }> {
-  if (entrada.items.length === 0) throw new Error('El pedido no tiene items.');
+  validarEntrada(entrada);
   // Un pedido fuera de horario no tiene a quién ofrecerse: no hay
-  // ni un puesto abierto en toda la feria. Salvo que ya esté cobrado
-  // —ver `yaCobrado`—, en cuyo caso rechazarlo es peor.
-  const fueraDeHorario = !estadoFeria().aceptandoPedidos;
-  if (fueraDeHorario && !entrada.yaCobrado) verificarHorario();
+  // ni un puesto abierto en toda la feria.
+  verificarHorario();
 
   // El punto lo decide el servidor a partir de la dirección escrita,
   // no la app: antes llegaba siempre el mismo par de coordenadas y
@@ -154,20 +186,12 @@ export async function crearPedido(entrada: PedidoEntrante): Promise<{ pedidoId: 
         : { ...CONFIG.puntoFeria, precision: 'feria' });
 
   return enTransaccion(async () => {
-    // Idempotencia: Shopify reintenta webhooks. Sin esto, un
-    // reintento crea el pedido dos veces y se despacha doble.
-    if (entrada.shopifyOrderId) {
-      const previo = await consultarUno<Fila>(
-        'SELECT id, numero FROM pedidos WHERE shopify_order_id = ?', entrada.shopifyOrderId);
-      if (previo) return { pedidoId: previo.id, numero: previo.numero };
-    }
-
     const productos = new Map<string, Fila>();
     for (const it of entrada.items) {
       if (productos.has(it.productoId)) continue;
       const p = await consultarUno<Fila>(
         'SELECT * FROM productos WHERE id = ? AND activo', it.productoId);
-      if (!p) throw new Error(`Producto inexistente o inactivo: ${it.productoId}`);
+      if (!p) throw new ErrorNegocio(422, `Producto inexistente o inactivo: ${it.productoId}`);
       productos.set(it.productoId, p);
     }
 
@@ -175,7 +199,7 @@ export async function crearPedido(entrada: PedidoEntrante): Promise<{ pedidoId: 
     let totalProductos = 0;
     for (const it of entrada.items) {
       if (!Number.isInteger(it.cantidad) || it.cantidad <= 0) {
-        throw new Error(`Cantidad inválida para ${it.productoId}`);
+        throw new ErrorNegocio(422, `Cantidad inválida para ${it.productoId}`);
       }
       const p = productos.get(it.productoId)!;
       totalProductos += p.precio_venta * it.cantidad;
@@ -189,19 +213,17 @@ export async function crearPedido(entrada: PedidoEntrante): Promise<{ pedidoId: 
         `El pedido mínimo es ${CONFIG.despacho.pedidoMinimo}. Este es de ${totalProductos}.`);
     }
 
-    // Un pedido que viene de Shopify ya trae cobrado su despacho en
-    // el checkout; uno interno se cotiza acá.
-    const costoDespacho = entrada.costoDespacho ?? calcularDespacho(totalProductos);
+    const costoDespacho = calcularDespacho(totalProductos);
     const totalVenta = totalProductos + costoDespacho;
 
     const pedidoId = id();
     const creado = await consultarUno<Fila>(
-      `INSERT INTO pedidos (id, shopify_order_id, feria_id, cliente_nombre,
+      `INSERT INTO pedidos (id, cliente_id, feria_id, cliente_nombre,
         cliente_telefono, cliente_email, direccion, lat, lng, geo_precision, notas,
         total_productos, costo_despacho, total_venta, estado)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING numero`,
-      pedidoId, entrada.shopifyOrderId ?? null, entrada.feriaId, entrada.clienteNombre,
+      pedidoId, entrada.clienteId ?? null, entrada.feriaId, entrada.clienteNombre,
       entrada.clienteTelefono, entrada.clienteEmail ?? null, entrada.direccion,
       punto.lat, punto.lng, punto.precision,
       entrada.notas ?? null, totalProductos, costoDespacho, totalVenta,
@@ -210,10 +232,6 @@ export async function crearPedido(entrada: PedidoEntrante): Promise<{ pedidoId: 
     const numero = creado!.numero;
     await registrarEvento('pedido', pedidoId, 'creado',
       { numero, totalProductos, costoDespacho, totalVenta, rubros: [...porRubro.keys()] });
-    if (fueraDeHorario) {
-      await registrarEvento('pedido', pedidoId, 'creado fuera de horario',
-        { mensaje: estadoFeria().mensaje });
-    }
 
     const subIds: string[] = [];
     for (const [rubroId, itemsRubro] of porRubro) {
@@ -256,12 +274,26 @@ export async function crearPedido(entrada: PedidoEntrante): Promise<{ pedidoId: 
  */
 export async function confirmarPago(pedidoId: string): Promise<boolean> {
   return enTransaccion(async () => {
+    // También desde EXPIRADO. El checkout de la pasarela sigue
+    // abierto después de que acá vence la reserva: quien paga al
+    // minuto 21 ya tiene la plata descontada. Antes ese pago quedaba
+    // anotado y el pedido muerto —sin despacho, sin reembolso y sin
+    // que nadie se enterara—. Plata cobrada es un pedido que sale.
+    const previo = await consultarUno<Fila>('SELECT estado FROM pedidos WHERE id = ?', pedidoId);
     const r = await ejecutar(
-      'UPDATE pedidos SET estado = ? WHERE id = ? AND estado = ?',
-      EstadoPedido.PAGADO, pedidoId, EstadoPedido.PENDIENTE_PAGO);
-    if (r.afectadas !== 1) return false;
+      'UPDATE pedidos SET estado = ? WHERE id = ? AND estado IN (?, ?)',
+      EstadoPedido.PAGADO, pedidoId, EstadoPedido.PENDIENTE_PAGO, EstadoPedido.EXPIRADO);
+    if (r.afectadas !== 1) {
+      // Pagó algo que ya está cancelado: no sale, pero tiene que
+      // verse. Queda en la lista de reembolsos pendientes del panel.
+      if (previo?.estado === EstadoPedido.CANCELADO) {
+        await registrarEvento('pedido', pedidoId, 'pago recibido sobre pedido cancelado');
+      }
+      return false;
+    }
 
-    await registrarEvento('pedido', pedidoId, '-> PAGADO');
+    await registrarEvento('pedido', pedidoId, '-> PAGADO',
+      previo?.estado === EstadoPedido.EXPIRADO ? { desde: 'EXPIRADO', pagoTardio: true } : undefined);
     publicar({ tipo: 'pedido:cambio', pedidoId, estado: EstadoPedido.PAGADO });
 
     await cambiarEstadoPedido(pedidoId, EstadoPedido.DESPACHANDO);
@@ -321,7 +353,7 @@ async function candidatos(sub: Fila, pedido: Fila, alcance: string, limite: numb
             (f.aceptaciones + 1.0) /
             (f.aceptaciones + f.rechazos + f.timeouts + f.incumplidos * 3 + 2.0) AS reputacion
        FROM feriantes f
-      WHERE f.conectado
+      WHERE f.conectado AND f.activo
         AND f.feria_id = ?
         ${filtroRubro}
         -- Se excluye a quien ya contestó (o dejó vencer) esta oferta.
@@ -343,7 +375,7 @@ async function candidatos(sub: Fila, pedido: Fila, alcance: string, limite: numb
  */
 export async function abrirRonda(subPedidoId: string, ronda: number): Promise<boolean> {
   const sub = await consultarUno<Fila>('SELECT * FROM sub_pedidos WHERE id = ?', subPedidoId);
-  if (!sub) throw new Error(`Sub-pedido inexistente: ${subPedidoId}`);
+  if (!sub) throw new ErrorNegocio(404, `Sub-pedido inexistente: ${subPedidoId}`);
 
   const config = CONFIG.rondas.find((r) => r.numero === ronda);
   if (!config) return false;
@@ -481,10 +513,11 @@ export async function rechazarOferta(subPedidoId: string, ferianteId: string): P
  */
 export async function liberarSubPedido(subPedidoId: string, ferianteId: string): Promise<void> {
   await enTransaccion(async () => {
-    const sub = await consultarUno<Fila>('SELECT * FROM sub_pedidos WHERE id = ?', subPedidoId);
-    if (!sub) throw new Error(`Sub-pedido inexistente: ${subPedidoId}`);
+    const sub = await consultarUno<Fila>(
+      'SELECT * FROM sub_pedidos WHERE id = ? FOR UPDATE', subPedidoId);
+    if (!sub) throw new ErrorNegocio(404, `Sub-pedido inexistente: ${subPedidoId}`);
     if (sub.estado !== EstadoSubPedido.ACEPTADO || sub.feriante_id !== ferianteId) {
-      throw new OfertaNoDisponible('Este pedido no está aceptado por tú.');
+      throw new OfertaNoDisponible('Este pedido no lo tienes tú.');
     }
 
     await ejecutar('UPDATE feriantes SET incumplidos = incumplidos + 1 WHERE id = ?', ferianteId);
@@ -496,6 +529,9 @@ export async function liberarSubPedido(subPedidoId: string, ferianteId: string):
     if (!await intentarSiguienteRonda(subPedidoId, sub.ronda + 1)) {
       await aAutogestion(subPedidoId, 'liberado sin reemplazo');
     }
+    // El repartidor ya puede tener el viaje: que no vaya a buscar
+    // la bolsa al puesto que la acaba de devolver.
+    await sincronizarParadas(sub.pedido_id);
   });
 }
 
@@ -514,8 +550,13 @@ async function aAutogestion(subPedidoId: string, motivo: string): Promise<void> 
 
 /** Cierra la ronda `ronda` y decide qué sigue. */
 async function avanzarCascada(subPedidoId: string, ronda: number): Promise<void> {
-  const sub = await consultarUno<Fila>('SELECT * FROM sub_pedidos WHERE id = ?', subPedidoId);
-  if (!sub || sub.estado !== EstadoSubPedido.OFERTANDO) return;
+  // Con el candado tomado. Sin él, un feriante que acepta en el
+  // segundo exacto en que vence la ronda se cruza con el reloj: el
+  // reloj había leído OFERTANDO, le pisaba la aceptación con un
+  // TIMEOUT y volvía a ofertar un pedido que ya tenía dueño.
+  const sub = await consultarUno<Fila>(
+    'SELECT * FROM sub_pedidos WHERE id = ? FOR UPDATE', subPedidoId);
+  if (!sub || sub.estado !== EstadoSubPedido.OFERTANDO || sub.ronda !== ronda) return;
 
   const vencidas = await consultar<Fila>(
     `SELECT * FROM ofertas
@@ -577,6 +618,28 @@ export async function marcarListo(subPedidoId: string): Promise<void> {
   });
 }
 
+const CAMINO: EstadoPedido[] = [
+  EstadoPedido.DESPACHANDO, EstadoPedido.EN_PREPARACION,
+  EstadoPedido.LISTO_PARA_RETIRO, EstadoPedido.EN_RUTA,
+];
+
+/**
+ * Lleva el pedido hasta `destino` pasando por los estados del medio.
+ *
+ * El repartidor puede retirar una bolsa que el feriante nunca marcó
+ * lista —se la pasó en la mano y siguió atendiendo—. Los
+ * sub-pedidos saltan a RETIRADO pero el pedido seguía EN_PREPARACION,
+ * y de ahí a EN_RUTA no hay transición: el retiro fallaba con
+ * «transición inválida» y el repartidor quedaba trabado en el puesto
+ * con la bolsa en la mano.
+ */
+async function avanzarPedidoHasta(pedido: Fila, destino: EstadoPedido): Promise<void> {
+  const desde = CAMINO.indexOf(pedido.estado);
+  const hasta = CAMINO.indexOf(destino);
+  if (desde < 0) return;
+  for (let i = desde + 1; i <= hasta; i++) await cambiarEstadoPedido(pedido.id, CAMINO[i]);
+}
+
 /**
  * Recalcula el estado del pedido a partir de sus sub-pedidos.
  * Es la única función que hace avanzar el pedido: así no hay dos
@@ -593,15 +656,19 @@ export async function evaluarPedido(pedidoId: string): Promise<void> {
 
   const todos = (...estados: string[]) => subs.every((s) => estados.includes(s.estado));
 
+  // Con el viaje ya armado, un sub-pedido que cambió de manos deja
+  // una parada apuntando al puesto que lo devolvió.
+  if (pedido.estado === EstadoPedido.EN_PREPARACION
+      || pedido.estado === EstadoPedido.LISTO_PARA_RETIRO) {
+    await sincronizarParadas(pedidoId);
+  }
+
   if (todos(EstadoSubPedido.RETIRADO)) {
-    await cambiarEstadoPedido(pedidoId, EstadoPedido.EN_RUTA);
+    await avanzarPedidoHasta(pedido, EstadoPedido.EN_RUTA);
     return;
   }
   if (todos(EstadoSubPedido.LISTO, EstadoSubPedido.RETIRADO)) {
-    if (pedido.estado === EstadoPedido.DESPACHANDO) {
-      await cambiarEstadoPedido(pedidoId, EstadoPedido.EN_PREPARACION);
-    }
-    await cambiarEstadoPedido(pedidoId, EstadoPedido.LISTO_PARA_RETIRO);
+    await avanzarPedidoHasta(pedido, EstadoPedido.LISTO_PARA_RETIRO);
     return;
   }
   // Todos los sub-pedidos tienen dueño (feriante o el operador):

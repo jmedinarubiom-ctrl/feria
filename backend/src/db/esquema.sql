@@ -23,13 +23,10 @@ CREATE TABLE IF NOT EXISTS productos (
   precio_costo  integer NOT NULL,          -- CLP, lo que le pagas al feriante
   activo        boolean NOT NULL DEFAULT true,
   /** Foto del producto. La app muestra un marcador si falta. */
-  imagen_url    text,
-  shopify_variant_id text                  -- enlace al catálogo de Shopify
+  imagen_url    text
 );
 
 CREATE INDEX IF NOT EXISTS idx_productos_rubro ON productos(rubro_id) WHERE activo;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_productos_variante
-  ON productos(shopify_variant_id) WHERE shopify_variant_id IS NOT NULL;
 
 -- ---------- Actores ----------
 
@@ -40,6 +37,8 @@ CREATE TABLE IF NOT EXISTS feriantes (
   feria_id      text NOT NULL,
   telefono      text NOT NULL,
   conectado     boolean NOT NULL DEFAULT false,
+  -- false = dado de baja: no entra ni recibe ofertas.
+  activo        boolean NOT NULL DEFAULT true,
   push_token    text,
   -- ubicación del puesto dentro de la feria (para la ruta de retiro)
   lat           double precision,
@@ -67,6 +66,7 @@ CREATE TABLE IF NOT EXISTS repartidores (
   vehiculo      text NOT NULL,             -- 'moto', 'auto', 'bici'
   telefono      text NOT NULL,
   conectado     boolean NOT NULL DEFAULT false,
+  activo        boolean NOT NULL DEFAULT true,
   push_token    text,
   lat           double precision,
   lng           double precision,
@@ -77,7 +77,6 @@ CREATE TABLE IF NOT EXISTS repartidores (
 
 CREATE TABLE IF NOT EXISTS pedidos (
   id                text PRIMARY KEY,
-  shopify_order_id  text UNIQUE,           -- NULL si el pedido es interno/manual
   -- Correlativo legible (#1042). Secuencia y no MAX()+1: con dos
   -- pedidos entrando a la vez, MAX()+1 entrega el mismo número dos
   -- veces.
@@ -259,7 +258,7 @@ CREATE INDEX IF NOT EXISTS idx_eventos_entidad ON eventos(entidad, entidad_id, a
 CREATE UNIQUE INDEX IF NOT EXISTS idx_feriantes_telefono ON feriantes(telefono);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_repartidores_telefono ON repartidores(telefono);
 
--- Operadores: vos y quien más maneje la caja. Se cargan a mano.
+-- Operadores: tú y quien más maneje la caja. Se cargan a mano.
 CREATE TABLE IF NOT EXISTS operadores (
   id            text PRIMARY KEY,
   nombre        text NOT NULL,
@@ -288,7 +287,7 @@ CREATE TABLE IF NOT EXISTS sesiones (
   id            text PRIMARY KEY,
   -- Igual que el código: se guarda el hash, nunca el token.
   token_hash    text NOT NULL UNIQUE,
-  rol           text NOT NULL CHECK (rol IN ('feriante', 'repartidor', 'operador')),
+  rol           text NOT NULL CHECK (rol IN ('feriante', 'repartidor', 'operador', 'cliente')),
   actor_id      text NOT NULL,
   telefono      text NOT NULL,
   dispositivo   text,
@@ -313,7 +312,7 @@ CREATE INDEX IF NOT EXISTS idx_sesiones_actor ON sesiones(actor_id)
 CREATE TABLE IF NOT EXISTS pagos (
   id                  text PRIMARY KEY,
   pedido_id           text NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
-  proveedor           text NOT NULL,          -- 'flow'
+  proveedor           text NOT NULL,          -- 'mercadopago' | 'dev'
   -- Nuestro identificador, el que viaja a la pasarela. Único para
   -- que un reintento no genere dos cobros.
   orden_comercio      text NOT NULL UNIQUE,

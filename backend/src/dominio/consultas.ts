@@ -90,11 +90,16 @@ export async function viajeActivo(repartidorId: string) {
 async function itemsDeLaParada(pedidoId: string, subPedidoRef: string) {
   const ref = await consultarUno<Fila>('SELECT * FROM sub_pedidos WHERE id = ?', subPedidoRef);
   if (!ref) return [];
+  // Lo que no tiene dueño todavía (ofertándose) o se canceló no se
+  // retira en esta parada.
+  const vivos = `estado NOT IN ('PENDIENTE', 'OFERTANDO', 'CANCELADO')`;
   const hermanos = ref.feriante_id
-    ? await consultar<Fila>('SELECT id FROM sub_pedidos WHERE pedido_id = ? AND feriante_id = ?',
+    ? await consultar<Fila>(
+        `SELECT id FROM sub_pedidos WHERE pedido_id = ? AND feriante_id = ? AND ${vivos}`,
         pedidoId, ref.feriante_id)
     : await consultar<Fila>(
-        'SELECT id FROM sub_pedidos WHERE pedido_id = ? AND feriante_id IS NULL', pedidoId);
+        `SELECT id FROM sub_pedidos WHERE pedido_id = ? AND feriante_id IS NULL AND ${vivos}`,
+        pedidoId);
   const listas = await Promise.all(hermanos.map((s) => items(s.id)));
   return listas.flat();
 }

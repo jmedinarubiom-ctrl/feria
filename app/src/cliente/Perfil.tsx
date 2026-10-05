@@ -8,6 +8,7 @@ import { Campo, useRellenoPestanas } from './piezas';
 import { useRecurso } from './cargar';
 import { useCliente, type Perfil as DatosPerfil } from './estado';
 import { textoHorario, textoUltimoPedido } from './horario';
+import Postular from './Postular';
 
 /** Datos de entrega y contacto de la feria. */
 export default function Perfil({ onSalir }: { onSalir: () => void }) {
@@ -58,7 +59,7 @@ export default function Perfil({ onSalir }: { onSalir: () => void }) {
             placeholder="Tu nombre"
           />
           <Campo
-            etiqueta="Teléfono"
+            etiqueta="Teléfono de contacto"
             value={borrador.telefono}
             onChangeText={(v) => { setBorrador({ ...borrador, telefono: v }); setGuardado(false); }}
             placeholder="+56 9 1234 5678"
@@ -129,7 +130,9 @@ export default function Perfil({ onSalir }: { onSalir: () => void }) {
         </View>
       ) : null}
 
-      <Boton titulo="Salir" variante="secundario" onPress={onSalir} />
+      <Postular />
+
+      <Boton titulo="Cerrar sesión" variante="secundario" onPress={onSalir} />
     </ScrollView>
   );
 }

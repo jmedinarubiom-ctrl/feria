@@ -71,25 +71,6 @@ test('la cotización le dice al cliente cuánto falta para el envío gratis', as
   assert.equal(grande.faltaParaGratis, 0);
 });
 
-test('un pedido de Shopify respeta el despacho que ya se cobró en el checkout', async () => {
-  // Si acá se recalculara, el cliente habría pagado una cosa y la
-  // base diría otra.
-  const { pedidoId } = await crearPedido({
-    feriaId: FERIA_ID,
-    clienteNombre: 'Cliente Shopify',
-    clienteTelefono: '+56999999999',
-    direccion: 'Av. Alemania 456',
-    lat: -33.05, lng: -71.62,
-    shopifyOrderId: 'gid://shopify/Order/555',
-    costoDespacho: 3990,
-    items: [{ productoId: 'p-tomate', cantidad: 4 }],
-  });
-
-  const p = await consultarUno<Fila>('SELECT * FROM pedidos WHERE id = ?', pedidoId);
-  assert.equal(p!.costo_despacho, 3990, 'se respeta lo del checkout');
-  assert.equal(p!.total_venta, 8800 + 3990);
-});
-
 test('el margen del día cuenta mercadería, reparto y comisiones', async () => {
   const { pedidoId } = await pedir([{ productoId: 'p-tomate', cantidad: 4 }]);
   const sub = await consultarUno<Fila>(

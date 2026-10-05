@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { api, useTablero } from '../api';
 import { C, E, R, T, clp } from '../tema';
 import { Boton, Cargando, Chip, tonoEstado } from '../ui';
 import { Pasos, llamar } from './piezas';
 import { Linea } from './Carrito';
+import { abrirPago } from './Pago';
 
 /**
  * Seguimiento del pedido.
@@ -28,8 +29,28 @@ export default function Seguimiento({
   pedidoId: string;
   volver: () => void;
 }) {
-  const { datos, cargando } = useTablero(`/pedidos/${pedidoId}`, 'cliente', pedidoId);
+  const { datos, cargando, recargar } = useTablero(`/pedidos/${pedidoId}`, 'cliente', pedidoId);
   const [contacto, setContacto] = useState<string | null>(null);
+  const [pagando, setPagando] = useState(false);
+
+  // Quien cerró el navegador sin pagar quedaba acá mirando
+  // «esperando el pago» sin forma de volver al checkout: el carro ya
+  // estaba vacío y el pedido expiraba solo. El servidor devuelve el
+  // mismo cobro abierto, así que no se genera uno nuevo.
+  const pagar = async () => {
+    setPagando(true);
+    try {
+      const pago = await api('POST', '/pagos/iniciar', { cuerpo: { pedidoId } });
+      await abrirPago(pago);
+      if (pago.pagoId) await api('POST', `/pagos/${pago.pagoId}/revisar`).catch(() => {});
+      await recargar();
+    } catch (err: any) {
+      Alert.alert('No se pudo abrir el pago', err.message);
+      await recargar();
+    } finally {
+      setPagando(false);
+    }
+  };
 
   useEffect(() => {
     api('GET', '/feria/estado').then((f) => setContacto(f.contacto)).catch(() => {});
@@ -76,6 +97,14 @@ export default function Seguimiento({
             </Text>
           </View>
         )}
+
+        {datos.estado === 'PENDIENTE_PAGO' ? (
+          <Boton
+            titulo={pagando ? 'ABRIENDO…' : `PAGAR · ${clp(datos.total_venta)}`}
+            onPress={pagar}
+            deshabilitado={pagando}
+          />
+        ) : null}
 
         {!terminado ? (
           <View style={e.tarjeta}>

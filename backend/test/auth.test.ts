@@ -121,10 +121,38 @@ test('frena el envío repetido de SMS al mismo número', async () => {
 test('un número desconocido recibe la misma respuesta que uno registrado', async () => {
   const r = await pedirCodigo('+56988887777');
   assert.equal(r.enviado, true, 'no delata qué números están registrados');
-  assert.equal(r.codigoDev, undefined, 'pero no genera ningún código');
+  assert.match(r.codigoDev!, /^\d{6}$/, 'y recibe su código: es un cliente nuevo');
 
-  const n = await consultarUno<Fila>('SELECT COUNT(*)::int AS n FROM codigos_acceso');
-  assert.equal(n!.n, 0, 'ni manda SMS');
+  // Pedir el código no registra a nadie: el número todavía no
+  // demostró ser de quien lo escribió.
+  const antes = await consultarUno<Fila>('SELECT COUNT(*)::int AS n FROM clientes');
+  assert.equal(antes!.n, 0);
+});
+
+test('un número nuevo que confirma su código queda como cliente', async () => {
+  const { codigoDev } = await pedirCodigo('+56988887777');
+  const s = await crearSesion('9 8888 7777', codigoDev!);
+  assert.equal(s.rol, 'cliente');
+
+  // La segunda vez es la misma persona, no otra cuenta.
+  const otra = await crearSesion('+56988887777', (await pedirCodigo('+56988887777')).codigoDev!);
+  assert.equal(otra.actorId, s.actorId);
+  const n = await consultarUno<Fila>('SELECT COUNT(*)::int AS n FROM clientes');
+  assert.equal(n!.n, 1);
+});
+
+test('en producción sin SMS, a un cliente se le dice que no hay ingreso', async () => {
+  const anterior = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  process.env.FERIA_SECRETO ??= 'secreto-de-test';
+  try {
+    await assert.rejects(() => pedirCodigo('+56988887777'),
+      (e: unknown) => e instanceof ErrorAuth && e.codigo === 503);
+    // Al equipo sí: el operador le dicta el código desde el panel.
+    assert.equal((await pedirCodigo(JOSE)).enviado, true);
+  } finally {
+    process.env.NODE_ENV = anterior;
+  }
 });
 
 test('un token inventado no vale', async () => {

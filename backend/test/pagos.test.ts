@@ -3,58 +3,26 @@ import assert from 'node:assert/strict';
 
 import { abrirDB, cerrarDB, consultar, consultarUno, ejecutar, type Fila } from '../src/db/index.ts';
 import { FERIA_ID } from '../src/db/semilla.ts';
-import { limpiarYSembrar } from './ayuda.ts';
+import { limpiarYSembrar, pasarelaDeMentira } from './ayuda.ts';
 import { crearPedido, expirarPendientes } from '../src/dominio/despacho.ts';
 import {
   iniciarPago, confirmarDesdePasarela, fijarPasarela, ErrorPago,
 } from '../src/dominio/pagos.ts';
-import {
-  firmar, fijarTransporteFlow, restaurarTransporteFlow, crearPasarelaFlow,
-} from '../src/pagos/flow.ts';
 import { CONFIG } from '../src/config.ts';
 
-const CFG = {
-  apiKey: 'llave-de-prueba',
-  secretKey: 'secreto-de-prueba',
-  base: 'https://sandbox.flow.cl/api',
-  urlConfirmacion: 'https://feria.cl/webhooks/flow/confirmacion',
-  urlRetorno: 'https://feria.cl/pagos/retorno',
-};
+let falsa = pasarelaDeMentira();
 
-/** Flow de mentira: guarda lo que se le pidió y responde lo que le digamos. */
-let creados: Array<Record<string, string>> = [];
-let estadoQueDevuelve: any = null;
-let firmasRecibidas: string[] = [];
-
-before(async () => {
-  await abrirDB({ memoria: true });
-  fijarPasarela(crearPasarelaFlow(CFG));
-  fijarTransporteFlow(async (url, cuerpo) => {
-    if (url.includes('/payment/create')) {
-      const params = Object.fromEntries(cuerpo!);
-      creados.push(params);
-      firmasRecibidas.push(params.s);
-      return {
-        url: 'https://sandbox.flow.cl/app/web/pay.php',
-        token: 'token-' + params.commerceOrder,
-        flowOrder: 12345,
-      };
-    }
-    return estadoQueDevuelve;
-  });
-});
+before(async () => { await abrirDB({ memoria: true }); });
 
 after(async () => {
-  restaurarTransporteFlow();
   fijarPasarela(null);
   await cerrarDB();
 });
 
 beforeEach(async () => {
   await limpiarYSembrar();
-  creados = [];
-  firmasRecibidas = [];
-  estadoQueDevuelve = null;
+  falsa = pasarelaDeMentira();
+  fijarPasarela(falsa);
 });
 
 const armarPedido = () => crearPedido({
@@ -66,9 +34,9 @@ const armarPedido = () => crearPedido({
   items: [{ productoId: 'p-tomate', cantidad: 4 }],
 });
 
-/** Lo que responde Flow cuando el pago salió bien. */
-const flowPagado = (ordenComercio: string, monto = 11300, media = 'Transferencia') => ({
-  status: 2, commerceOrder: ordenComercio, amount: monto, paymentData: { media },
+/** Lo que responde la pasarela cuando el pago salió bien. */
+const pagado = (ordenComercio: string, monto = 11300, medio = 'Transferencia') => ({
+  pagado: true, ordenComercio, monto, medio,
 });
 
 // ============================================================
@@ -87,19 +55,15 @@ test('un pedido nuevo no se despacha hasta que se paga', async () => {
   assert.ok(subs.every((s) => s.estado === 'PENDIENTE'));
 });
 
-test('iniciar el pago devuelve la URL de Flow y firma la petición', async () => {
+test('iniciar el pago devuelve la URL de la pasarela y cobra el total', async () => {
   const { pedidoId, numero } = await armarPedido();
   const r = await iniciarPago(pedidoId, 'cliente@correo.cl');
 
-  assert.ok(r.url!.startsWith('https://sandbox.flow.cl/app/web/pay.php?token='));
-  assert.equal(creados.length, 1);
-  assert.equal(creados[0].amount, '11300', 'cobra el total con despacho');
-  assert.equal(creados[0].currency, 'CLP');
-  assert.match(creados[0].commerceOrder, new RegExp(`^feria-${numero}-`));
-
-  // La firma tiene que ser la que Flow espera, o rechaza sin decir por qué.
-  const { s: firma, ...params } = creados[0];
-  assert.equal(firma, firmar(params, CFG.secretKey));
+  assert.ok(r.url!.startsWith('https://pasarela.test/pagar?token='));
+  assert.equal(falsa.creados.length, 1);
+  assert.equal(falsa.creados[0].monto, 11300, 'cobra el total con despacho');
+  assert.equal(falsa.creados[0].email, 'cliente@correo.cl');
+  assert.match(falsa.creados[0].ordenComercio, new RegExp(`^feria-${numero}-`));
 });
 
 test('volver atrás en la app no genera dos cobros', async () => {
@@ -108,15 +72,15 @@ test('volver atrás en la app no genera dos cobros', async () => {
   const b = await iniciarPago(pedidoId, 'cliente@correo.cl');
 
   assert.equal(a.url, b.url, 'se reusa la misma orden de pago');
-  assert.equal(creados.length, 1, 'a Flow se le pidió una sola vez');
+  assert.equal(falsa.creados.length, 1, 'a la pasarela se le pidió una sola vez');
 });
 
-test('cuando Flow confirma, recién ahí sale a la feria', async () => {
+test('cuando la pasarela confirma, recién ahí sale a la feria', async () => {
   const { pedidoId } = await armarPedido();
   const { pagoId } = await iniciarPago(pedidoId, 'cliente@correo.cl');
   const pago = await consultarUno<Fila>('SELECT * FROM pagos WHERE id = ?', pagoId);
 
-  estadoQueDevuelve = flowPagado(pago!.orden_comercio);
+  falsa.estado = pagado(pago!.orden_comercio);
   const r = await confirmarDesdePasarela(pago!.referencia_externa);
 
   assert.equal(r.pagado, true);
@@ -131,16 +95,16 @@ test('cuando Flow confirma, recién ahí sale a la feria', async () => {
   assert.equal(guardado!.medio, 'Transferencia');
 });
 
-test('un aviso repetido de Flow no despacha dos veces', async () => {
+test('un aviso repetido de la pasarela no despacha dos veces', async () => {
   const { pedidoId } = await armarPedido();
   const { pagoId } = await iniciarPago(pedidoId, 'cliente@correo.cl');
   const pago = await consultarUno<Fila>('SELECT * FROM pagos WHERE id = ?', pagoId);
-  estadoQueDevuelve = flowPagado(pago!.orden_comercio);
+  falsa.estado = pagado(pago!.orden_comercio);
 
   await confirmarDesdePasarela(pago!.referencia_externa);
   const ofertasTras1 = await consultarUno<Fila>('SELECT COUNT(*)::int AS n FROM ofertas');
 
-  // Flow reintenta sus confirmaciones durante horas.
+  // Las pasarelas reintentan sus avisos durante horas.
   await confirmarDesdePasarela(pago!.referencia_externa);
   await confirmarDesdePasarela(pago!.referencia_externa);
 
@@ -154,7 +118,7 @@ test('si el monto pagado no coincide, no se despacha nada', async () => {
   const pago = await consultarUno<Fila>('SELECT * FROM pagos WHERE id = ?', pagoId);
 
   // Alguien manipuló el monto en el camino.
-  estadoQueDevuelve = flowPagado(pago!.orden_comercio, 100);
+  falsa.estado = pagado(pago!.orden_comercio, 100);
   await assert.rejects(() => confirmarDesdePasarela(pago!.referencia_externa), ErrorPago);
 
   const p = await consultarUno<Fila>('SELECT estado FROM pedidos WHERE id = ?', pedidoId);
@@ -166,7 +130,7 @@ test('un pago rechazado deja el pedido sin despachar', async () => {
   const { pagoId } = await iniciarPago(pedidoId, 'cliente@correo.cl');
   const pago = await consultarUno<Fila>('SELECT * FROM pagos WHERE id = ?', pagoId);
 
-  estadoQueDevuelve = { status: 3, commerceOrder: pago!.orden_comercio, amount: 11300 };
+  falsa.estado = { pagado: false, cerrado: true, ordenComercio: pago!.orden_comercio, monto: 11300 };
   const r = await confirmarDesdePasarela(pago!.referencia_externa);
 
   assert.equal(r.pagado, false);
@@ -178,7 +142,7 @@ test('un pago rechazado deja el pedido sin despachar', async () => {
 
 test('un aviso con un token inventado no confirma nada', async () => {
   await armarPedido();
-  estadoQueDevuelve = { status: 2, commerceOrder: 'feria-9999-falsa', amount: 11300 };
+  falsa.estado = { pagado: true, ordenComercio: 'feria-9999-falsa', monto: 11300 };
 
   // El callback es HTTP abierto: cualquiera puede llamarlo.
   await assert.rejects(() => confirmarDesdePasarela('token-inventado'), ErrorPago);
@@ -222,6 +186,6 @@ test('sin pasarela configurada, en producción no se cobra gratis', async () => 
       (e: ErrorPago) => e.codigo === 503);
   } finally {
     process.env.NODE_ENV = anterior;
-    fijarPasarela(crearPasarelaFlow(CFG));
+    fijarPasarela(falsa);
   }
 });

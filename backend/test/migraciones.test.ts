@@ -55,3 +55,19 @@ test('una base vieja sin la columna la recupera al migrar', async () => {
       WHERE table_name = 'productos' AND column_name = 'imagen_url'`);
   assert.ok(col, 'la migración tiene que volver a agregarla');
 });
+
+test('una base de cuando había Shopify pierde esas columnas al migrar', async () => {
+  await ejecutar('ALTER TABLE pedidos ADD COLUMN shopify_order_id text UNIQUE');
+  await ejecutar('ALTER TABLE productos ADD COLUMN shopify_variant_id text');
+  await ejecutar(`CREATE UNIQUE INDEX idx_productos_variante
+    ON productos(shopify_variant_id) WHERE shopify_variant_id IS NOT NULL`);
+  await ejecutar("DELETE FROM migraciones WHERE nombre = '005-sin-shopify.sql'");
+
+  const { migrar } = await import('../src/db/index.ts');
+  await migrar();
+
+  const quedan = await consultar(
+    `SELECT column_name FROM information_schema.columns
+      WHERE column_name IN ('shopify_order_id', 'shopify_variant_id')`);
+  assert.equal(quedan.length, 0);
+});

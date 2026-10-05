@@ -68,7 +68,7 @@ for _ in $(seq 1 40); do
   sleep 1
 done
 if [ -z "$PUBLICA" ]; then
-  echo "⚠ El túnel no dio una dirección. Mirá $LOG_TUNEL"
+  echo "⚠ El túnel no dio una dirección. Mira $LOG_TUNEL"
   exit 1
 fi
 echo "  $PUBLICA"
@@ -79,6 +79,11 @@ echo "  $PUBLICA"
 # pueda avisarle de los pagos.
 export URL_PUBLICA="$PUBLICA"
 export FERIA_SIEMPRE_ABIERTA=1
+# El backend queda a la vista de cualquiera que tenga la dirección:
+# los atajos de desarrollo (el código de ingreso en pantalla, pagar
+# sin cobrar) quedan solo para este computador. A la gente del
+# equipo le das el código desde el panel: Gente → «Código».
+export FERIA_EXPUESTA=1
 
 echo "→ Backend…"
 : > "$LOG_BACKEND"
@@ -107,6 +112,10 @@ if [ "$LISTO" = "si" ]; then
 
    En la app: pantalla de ingreso → tocar la dirección →
    escribir:  $PUBLICA
+
+   Los códigos de ingreso ya no salen en la pantalla del
+   teléfono: se generan en el panel (Gente → Código) o se
+   leen en .registro/backend.log
   ────────────────────────────────────────────────────────
 
    Ctrl+C corta todo. Los registros quedan en .registro/

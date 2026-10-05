@@ -11,16 +11,38 @@ import { guardarSesion, type SesionGuardada } from '../almacen';
 import { C, E, FUENTES, R, T } from '../tema';
 import { Aviso, Boton } from '../ui';
 import { Logotipo } from '../Logotipo';
+import IngresoExterno, { type SesionExterna } from './IngresoExterno';
 
 /**
- * Ingreso por SMS.
+ * Ingreso.
  *
- * Dos pasos y nada más: número y código. El feriante no tiene
- * contraseña que recordar ni cuenta que crear — su teléfono ya es
- * su identidad en la feria.
+ * Dos pasos y nada más: a dónde mandar el código, y el código. Nadie
+ * tiene contraseña que recordar.
+ *
+ * El teléfono es la identidad de la gente de la feria: feriantes,
+ * repartidores y el operador entran con él. El comprador además
+ * puede entrar con su correo, con Google o con Apple —le sirve
+ * igual y no cuesta un SMS—, y eso le da solo cuenta de comprador.
  */
+function Medio({ texto, activo, onPress }: {
+  texto: string; activo: boolean; onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: activo }}
+      style={[e.medio, activo && { backgroundColor: C.verde, borderColor: C.verde }]}
+    >
+      <Text style={[T.apoyo, { color: activo ? '#FFFFFF' : C.texto }]}>{texto}</Text>
+    </Pressable>
+  );
+}
+
 export default function Entrar({ onEntro }: { onEntro: (s: SesionGuardada) => void }) {
   const [paso, setPaso] = useState<'telefono' | 'codigo'>('telefono');
+  const [medio, setMedio] = useState<'telefono' | 'correo'>('telefono');
+  const [correo, setCorreo] = useState('');
   const [cambiandoServidor, setCambiandoServidor] = useState(false);
   const [otroServidor, setOtroServidor] = useState('');
 
@@ -37,11 +59,24 @@ export default function Entrar({ onEntro }: { onEntro: (s: SesionGuardada) => vo
   const [ocupado, setOcupado] = useState(false);
   const campoCodigo = useRef<TextInput>(null);
 
+  const destino = medio === 'correo' ? { correo: correo.trim() } : { telefono };
+
+  /** Guarda la sesión y entra, venga del código, de Google o de Apple. */
+  const entrarCon = async (s: SesionExterna, conTelefono?: string) => {
+    const sesion: SesionGuardada = {
+      token: s.token, rol: s.rol as SesionGuardada['rol'], actorId: s.actorId,
+      nombre: s.nombre, telefono: conTelefono,
+    };
+    fijarToken(s.token);
+    await guardarSesion(sesion);
+    onEntro(sesion);
+  };
+
   const enviar = async () => {
     setOcupado(true);
     setError(null);
     try {
-      const r = await pedirCodigo(telefono);
+      const r = await pedirCodigo(destino);
       setPaso('codigo');
       // Sin proveedor de SMS configurado no hay forma de recibirlo,
       // así que el servidor lo devuelve para poder probar.
@@ -59,13 +94,8 @@ export default function Entrar({ onEntro }: { onEntro: (s: SesionGuardada) => vo
     setError(null);
     try {
       const dispositivo = `${Platform.OS} · ${Platform.Version}`;
-      const s = await canjearCodigo(telefono, codigo, dispositivo);
-      const sesion: SesionGuardada = {
-        token: s.token, rol: s.rol, actorId: s.actorId, nombre: s.nombre,
-      };
-      fijarToken(s.token);
-      await guardarSesion(sesion);
-      onEntro(sesion);
+      const s = await canjearCodigo(destino, codigo, dispositivo);
+      await entrarCon(s, medio === 'telefono' ? telefono : undefined);
     } catch (e: any) {
       setError(e instanceof ErrorApi ? e.message : 'No se pudo entrar.');
       setCodigo('');
@@ -91,27 +121,61 @@ export default function Entrar({ onEntro }: { onEntro: (s: SesionGuardada) => vo
 
         {paso === 'telefono' ? (
           <>
-            <Text style={[T.seccion, { marginBottom: E.s }]}>Tu teléfono</Text>
-            <TextInput
-              style={e.campo}
-              value={telefono}
-              onChangeText={setTelefono}
-              placeholder="+56 9 1234 5678"
-              placeholderTextColor={C.textoSuave}
-              keyboardType="phone-pad"
-              autoComplete="tel"
-              textContentType="telephoneNumber"
-              editable={!ocupado}
-              onSubmitEditing={enviar}
-              returnKeyType="send"
-            />
+            <View style={e.medios}>
+              <Medio texto="Con mi teléfono" activo={medio === 'telefono'}
+                     onPress={() => { setMedio('telefono'); setError(null); }} />
+              <Medio texto="Con mi correo" activo={medio === 'correo'}
+                     onPress={() => { setMedio('correo'); setError(null); }} />
+            </View>
+            {medio === 'telefono' ? (
+              <TextInput
+                style={e.campo}
+                value={telefono}
+                onChangeText={setTelefono}
+                placeholder="+56 9 1234 5678"
+                placeholderTextColor={C.textoSuave}
+                keyboardType="phone-pad"
+                autoComplete="tel"
+                textContentType="telephoneNumber"
+                editable={!ocupado}
+                onSubmitEditing={enviar}
+                returnKeyType="send"
+              />
+            ) : (
+              <TextInput
+                style={e.campo}
+                value={correo}
+                onChangeText={setCorreo}
+                placeholder="tu@correo.cl"
+                placeholderTextColor={C.textoSuave}
+                keyboardType="email-address"
+                autoComplete="email"
+                textContentType="emailAddress"
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!ocupado}
+                onSubmitEditing={enviar}
+                returnKeyType="send"
+              />
+            )}
             <Text style={[T.apoyo, { marginBottom: 20 }]}>
-              Te mandamos un código por mensaje. No hay contraseña que recordar.
+              {medio === 'telefono'
+                ? 'Te mandamos un código por mensaje. No hay contraseña que recordar.'
+                  + '\nSi es tu primera vez, con esto quedas registrado.'
+                : 'Te mandamos un código al correo. Sirve para comprar.'
+                  + '\nSi tienes un puesto o repartes, entra con tu teléfono.'}
             </Text>
             <Boton
               titulo={ocupado ? 'ENVIANDO…' : 'ENVIAR CÓDIGO'}
               onPress={enviar}
-              deshabilitado={ocupado || telefono.replace(/\D/g, '').length < 9}
+              deshabilitado={ocupado || (medio === 'telefono'
+                ? telefono.replace(/\D/g, '').length < 9
+                : !/^\S+@\S+\.\S{2,}$/.test(correo.trim()))}
+            />
+            <IngresoExterno
+              deshabilitado={ocupado}
+              alEntrar={(s) => void entrarCon(s)}
+              alFallar={setError}
             />
           </>
         ) : (
@@ -132,7 +196,7 @@ export default function Entrar({ onEntro }: { onEntro: (s: SesionGuardada) => vo
               onSubmitEditing={entrar}
             />
             <Text style={[T.apoyo, { marginBottom: 8 }]}>
-              Enviado a {telefono}. Vence en 5 minutos.
+              Enviado a {medio === 'correo' ? correo.trim() : telefono}. Vence en 5 minutos.
             </Text>
             {pista ? <Aviso texto={pista} tono="aviso" /> : null}
 
@@ -143,7 +207,7 @@ export default function Entrar({ onEntro }: { onEntro: (s: SesionGuardada) => vo
             />
             <View style={{ marginTop: 10 }}>
               <Boton
-                titulo="Usar otro número"
+                titulo="Cambiar teléfono o correo"
                 variante="secundario"
                 deshabilitado={ocupado}
                 onPress={() => {
@@ -220,6 +284,11 @@ const e = StyleSheet.create({
     borderWidth: 1.5, borderColor: C.borde, borderRadius: R.grande,
     paddingHorizontal: E.l + 2, paddingVertical: E.l,
     fontFamily: FUENTES.cuerpo, fontSize: 20, color: C.texto, marginBottom: E.s,
+  },
+  medios: { flexDirection: 'row', gap: E.s, marginBottom: E.m },
+  medio: {
+    flex: 1, alignItems: 'center', paddingVertical: E.m, borderRadius: R.medio,
+    borderWidth: 1, borderColor: C.borde, backgroundColor: C.superficie,
   },
   campoCodigo: {
     fontFamily: FUENTES.tituloFuerte, fontSize: 34, letterSpacing: 10, textAlign: 'center',

@@ -26,13 +26,13 @@ PUERTO="${2:-4000}"
 
 if ! curl -s -m 3 "http://localhost:$PUERTO/salud" > /dev/null 2>&1; then
   echo "⚠ El backend no responde en el puerto $PUERTO."
-  echo "  Levantalo primero:  cd backend && npm start"
+  echo "  Levántalo primero:  cd backend && npm start"
   exit 1
 fi
 
 echo "→ Abriendo https://$SUBDOMINIO.loca.lt → localhost:$PUERTO"
 echo
-echo "  Cuando aparezca la dirección, ponela en la app:"
+echo "  Cuando aparezca la dirección, ponla en la app:"
 echo "  pantalla de ingreso → tocar la dirección de abajo → pegarla."
 echo
 echo "  Y en backend/.env:  URL_PUBLICA=https://$SUBDOMINIO.loca.lt"

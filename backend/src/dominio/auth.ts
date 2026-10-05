@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, randomInt, timingSafeEqual, createHash } from 'node:crypto';
 import { ahora, consultar, consultarUno, ejecutar, enTransaccion, id, registrarEvento, type Fila } from '../db/index.ts';
 import { enviarSms, proveedorSms } from '../sms.ts';
+import { enviarCorreo, proveedorCorreo } from '../correo.ts';
 import { CONFIG } from '../config.ts';
 
 export class ErrorAuth extends Error {
@@ -23,7 +24,7 @@ function secreto(): string {
   const s = process.env.FERIA_SECRETO;
   if (s) return s;
   if (process.env.NODE_ENV === 'production') {
-    throw new Error('Falta FERIA_SECRETO. Generalo con: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+    throw new Error('Falta FERIA_SECRETO. Genéralo con: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
   }
   return 'secreto-de-desarrollo-no-usar-en-produccion';
 }
@@ -66,16 +67,26 @@ export function normalizarTelefono(entrada: string): string {
   throw malo;
 }
 
-/** Busca a quién pertenece un teléfono. El operador tiene prioridad. */
+/**
+ * Busca a quién pertenece un teléfono.
+ *
+ * Primero la gente de la feria —operador, feriante, repartidor,
+ * solo los activos— y después los clientes. Un feriante dado de
+ * baja, o uno que pidió entrar y todavía no fue aprobado, entra
+ * como cliente: puede comprar, no puede vender.
+ */
 async function quienEs(telefono: string): Promise<{ rol: string; id: string; nombre: string } | null> {
   const op = await consultarUno<Fila>('SELECT * FROM operadores WHERE telefono = ?', telefono);
   if (op) return { rol: 'operador', id: op.id, nombre: op.nombre };
 
-  const f = await consultarUno<Fila>('SELECT * FROM feriantes WHERE telefono = ?', telefono);
+  const f = await consultarUno<Fila>('SELECT * FROM feriantes WHERE telefono = ? AND activo', telefono);
   if (f) return { rol: 'feriante', id: f.id, nombre: f.nombre };
 
-  const r = await consultarUno<Fila>('SELECT * FROM repartidores WHERE telefono = ?', telefono);
+  const r = await consultarUno<Fila>('SELECT * FROM repartidores WHERE telefono = ? AND activo', telefono);
   if (r) return { rol: 'repartidor', id: r.id, nombre: r.nombre };
+
+  const c = await consultarUno<Fila>('SELECT * FROM clientes WHERE telefono = ?', telefono);
+  if (c) return { rol: 'cliente', id: c.id, nombre: c.nombre };
 
   return null;
 }
@@ -87,11 +98,14 @@ async function quienEs(telefono: string): Promise<{ rol: string; id: string; nom
 /**
  * Manda un código de 6 dígitos por SMS.
  *
- * Devuelve lo mismo esté el número registrado o no: si contestara
- * distinto, cualquiera podría averiguar qué números pertenecen a
- * feriantes de la plataforma probando de a uno.
+ * A cualquier celular chileno: un número que no se conoce es un
+ * cliente nuevo, y con el código queda registrado. La respuesta es
+ * la misma para todos, así que no dice qué números son de feriantes.
  */
-export async function pedirCodigo(telefonoCrudo: string): Promise<{ enviado: true; expiraEn: number; codigoDev?: string }> {
+export async function pedirCodigo(
+  telefonoCrudo: string,
+  opciones: { ocultarCodigo?: boolean } = {},
+): Promise<{ enviado: true; expiraEn: number; codigoDev?: string }> {
   const telefono = normalizarTelefono(telefonoCrudo);
 
   // Freno de abuso: cada SMS cuesta plata y molesta al dueño del
@@ -105,11 +119,13 @@ export async function pedirCodigo(telefonoCrudo: string): Promise<{ enviado: tru
   }
 
   const quien = await quienEs(telefono);
-  if (!quien) {
-    // Se simula el trabajo del caso real para no delatar por tiempo
-    // de respuesta que el número no existe.
-    await new Promise((r) => setTimeout(r, 120));
-    return { enviado: true, expiraEn: CONFIG.auth.vidaCodigoSegundos };
+  const esDelEquipo = !!quien && quien.rol !== 'cliente';
+
+  // Al equipo el operador le puede dictar el código desde el panel;
+  // a un cliente no. Sin proveedor de SMS en producción, pedirle el
+  // código sería dejarlo esperando un mensaje que no va a llegar.
+  if (!esDelEquipo && process.env.NODE_ENV === 'production' && proveedorSms() === 'consola') {
+    throw new ErrorAuth(503, 'El ingreso por mensaje todavía no está disponible.');
   }
 
   const codigo = String(randomInt(0, 1_000_000)).padStart(6, '0');
@@ -127,9 +143,15 @@ export async function pedirCodigo(telefonoCrudo: string): Promise<{ enviado: tru
       id(), telefono, hmac(telefono + ':' + codigo), expira);
   });
 
-  await enviarSms(telefono,
+  const envio = await enviarSms(telefono,
     `Feria: tu código es ${codigo}. Vence en ${Math.round(CONFIG.auth.vidaCodigoSegundos / 60)} minutos.`);
-  await registrarEvento('auth', quien.id, 'código enviado', { rol: quien.rol, via: proveedorSms() });
+  // Al cliente no hay otra forma de hacerle llegar el código: si el
+  // mensaje no salió, tiene que saberlo en vez de quedarse esperando.
+  if (!envio.enviado && !esDelEquipo) {
+    throw new ErrorAuth(502, 'No pudimos mandarte el mensaje. Intenta de nuevo en un rato.');
+  }
+  await registrarEvento('auth', quien?.id ?? telefono, 'código enviado',
+    { rol: quien?.rol ?? 'cliente nuevo', via: proveedorSms() });
 
   return {
     enviado: true,
@@ -137,6 +159,7 @@ export async function pedirCodigo(telefonoCrudo: string): Promise<{ enviado: tru
     // Sin proveedor de SMS no hay forma de recibir el código, así
     // que en desarrollo se devuelve. En producción nunca sale.
     ...(process.env.NODE_ENV !== 'production' && proveedorSms() === 'consola'
+        && !opciones.ocultarCodigo
       ? { codigoDev: codigo }
       : {}),
   };
@@ -154,17 +177,20 @@ export type Sesion = {
   expiraAt: Date;
 };
 
-export async function crearSesion(
-  telefonoCrudo: string, codigo: string, dispositivo?: string,
-): Promise<Sesion> {
-  const telefono = normalizarTelefono(telefonoCrudo);
+/**
+ * Comprueba un código contra su destino (un teléfono o un correo).
+ *
+ * No lo consume: eso lo hace `abrirSesion`, dentro de la misma
+ * transacción que crea la sesión.
+ */
+async function comprobarCodigo(destino: string, codigo: string): Promise<Fila> {
   const generico = new ErrorAuth(401, 'Código incorrecto o vencido.');
 
   const fila = await consultarUno<Fila>(
     `SELECT * FROM codigos_acceso
       WHERE telefono = ? AND usado_at IS NULL
       ORDER BY creado_at DESC LIMIT 1`,
-    telefono);
+    destino);
   if (!fila) throw generico;
   if (fila.expira_at.getTime() < Date.now()) throw generico;
 
@@ -182,32 +208,230 @@ export async function crearSesion(
   // el error y el código se podría probar infinitas veces.
   await ejecutar('UPDATE codigos_acceso SET intentos = intentos + 1 WHERE id = ?', fila.id);
 
-  if (!igualSeguro(fila.codigo_hash, hmac(telefono + ':' + String(codigo ?? '').trim()))) {
+  if (!igualSeguro(fila.codigo_hash, hmac(destino + ':' + String(codigo ?? '').trim()))) {
     throw generico;
   }
+  return fila;
+}
 
-  const quien = await quienEs(telefono);
-  if (!quien) throw generico;
+type Quien = { rol: string; id: string; nombre: string };
 
+/**
+ * Crea la sesión. Con `codigoId`, antes consume ese código.
+ *
+ * `quien` se resuelve adentro de la transacción: es donde se
+ * registra al cliente nuevo, y no puede quedar registrado alguien
+ * cuya sesión después no se creó.
+ */
+async function abrirSesion(datos: {
+  codigoId?: string;
+  quien: () => Promise<Quien>;
+  telefono: string | null;
+  dispositivo?: string;
+}): Promise<Sesion> {
   return enTransaccion(async () => {
-    // Marcar usado de forma condicional cierra la carrera de dos
-    // peticiones con el mismo código correcto a la vez: la segunda
-    // no afecta ninguna fila y no llega a crear sesión.
-    const consumido = await ejecutar(
-      'UPDATE codigos_acceso SET usado_at = ? WHERE id = ? AND usado_at IS NULL',
-      ahora(), fila.id);
-    if (consumido.afectadas !== 1) throw generico;
+    if (datos.codigoId) {
+      // Marcar usado de forma condicional cierra la carrera de dos
+      // peticiones con el mismo código correcto a la vez: la segunda
+      // no afecta ninguna fila y no llega a crear sesión.
+      const consumido = await ejecutar(
+        'UPDATE codigos_acceso SET usado_at = ? WHERE id = ? AND usado_at IS NULL',
+        ahora(), datos.codigoId);
+      if (consumido.afectadas !== 1) throw new ErrorAuth(401, 'Código incorrecto o vencido.');
+    }
 
+    const quien = await datos.quien();
     const token = randomBytes(32).toString('base64url');
     const expiraAt = new Date(Date.now() + CONFIG.auth.vidaSesionDias * 86_400_000);
     await ejecutar(
       `INSERT INTO sesiones (id, token_hash, rol, actor_id, telefono, dispositivo, expira_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      id(), hashToken(token), quien.rol, quien.id, telefono,
-      dispositivo?.slice(0, 120) ?? null, expiraAt);
+      id(), hashToken(token), quien.rol, quien.id, datos.telefono,
+      datos.dispositivo?.slice(0, 120) ?? null, expiraAt);
 
-    await registrarEvento('auth', quien.id, 'sesión iniciada', { rol: quien.rol, dispositivo });
+    await registrarEvento('auth', quien.id, 'sesión iniciada',
+      { rol: quien.rol, dispositivo: datos.dispositivo });
     return { token, rol: quien.rol, actorId: quien.id, nombre: quien.nombre, expiraAt };
+  });
+}
+
+/** Registra un cliente nuevo con lo que se sepa de él. */
+async function nuevoCliente(campos: Record<string, string | null>): Promise<Quien> {
+  const nuevo = 'c-' + id().slice(0, 12);
+  const columnas = Object.keys(campos);
+  await ejecutar(
+    `INSERT INTO clientes (id, ${columnas.join(', ')})
+     VALUES (?, ${columnas.map(() => '?').join(', ')})`,
+    nuevo, ...Object.values(campos));
+  await registrarEvento('cliente', nuevo, 'registrado', { con: columnas });
+  return { rol: 'cliente', id: nuevo, nombre: campos.nombre ?? '' };
+}
+
+export async function crearSesion(
+  telefonoCrudo: string, codigo: string, dispositivo?: string,
+): Promise<Sesion> {
+  const telefono = normalizarTelefono(telefonoCrudo);
+  const fila = await comprobarCodigo(telefono, codigo);
+
+  return abrirSesion({
+    codigoId: fila.id,
+    telefono,
+    dispositivo,
+    // Un número que no es de nadie y que demostró ser de quien lo
+    // escribió: es un cliente nuevo. Se registra acá, no al pedir el
+    // código, para no llenar la tabla de números que alguien tipeó.
+    quien: async () => (await quienEs(telefono)) ?? nuevoCliente({ telefono }),
+  });
+}
+
+// ============================================================
+// Ingreso del comprador sin teléfono: código al correo
+// ============================================================
+
+/**
+ * Deja el correo en una sola forma, o lo rechaza.
+ *
+ * No se intenta validar de verdad —la única validación que vale es
+ * que el código llegue—, solo descartar lo que claramente no es.
+ */
+export function normalizarCorreo(entrada: unknown): string {
+  const correo = String(entrada ?? '').trim().toLowerCase();
+  if (correo.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(correo)) {
+    throw new ErrorAuth(400, 'Ese correo no parece válido.');
+  }
+  return correo;
+}
+
+/** Genera y guarda un código para un destino, con su freno de abuso. */
+async function emitirCodigo(destino: string): Promise<string> {
+  const recientes = await consultarUno<Fila>(
+    `SELECT COUNT(*)::int AS n FROM codigos_acceso
+      WHERE telefono = ? AND creado_at > now() - make_interval(secs => ?)`,
+    destino, CONFIG.auth.ventanaEnvioSegundos);
+  if ((recientes?.n ?? 0) >= CONFIG.auth.maxEnviosPorVentana) {
+    throw new ErrorAuth(429, 'Pediste demasiados códigos. Espera unos minutos.');
+  }
+
+  const codigo = String(randomInt(0, 1_000_000)).padStart(6, '0');
+  const expira = new Date(Date.now() + CONFIG.auth.vidaCodigoSegundos * 1000);
+  await enTransaccion(async () => {
+    await ejecutar(
+      'UPDATE codigos_acceso SET usado_at = ? WHERE telefono = ? AND usado_at IS NULL',
+      ahora(), destino);
+    await ejecutar(
+      `INSERT INTO codigos_acceso (id, telefono, codigo_hash, expira_at)
+       VALUES (?, ?, ?, ?)`,
+      id(), destino, hmac(destino + ':' + codigo), expira);
+  });
+  return codigo;
+}
+
+/**
+ * Manda el código al correo. Es el ingreso del comprador que no
+ * quiere —o no puede— recibir un SMS, y no cuesta un mensaje.
+ *
+ * Con correo solo se entra como cliente. Feriantes, repartidores y
+ * el operador entran con su teléfono, que es el número al que se
+ * los llama y con el que el operador los aprobó.
+ */
+export async function pedirCodigoPorCorreo(
+  correoCrudo: unknown, opciones: { ocultarCodigo?: boolean } = {},
+): Promise<{ enviado: true; expiraEn: number; codigoDev?: string }> {
+  const correo = normalizarCorreo(correoCrudo);
+
+  if (process.env.NODE_ENV === 'production' && proveedorCorreo() === 'consola') {
+    throw new ErrorAuth(503, 'El ingreso por correo todavía no está disponible.');
+  }
+
+  const codigo = await emitirCodigo(correo);
+  const minutos = Math.round(CONFIG.auth.vidaCodigoSegundos / 60);
+  const envio = await enviarCorreo(correo, `${codigo} es tu código de la Feria`,
+    `Tu código para entrar a la Feria es ${codigo}.\n\nVence en ${minutos} minutos. `
+    + 'Si no lo pediste tú, no hagas nada: sin el código nadie puede entrar.');
+  if (!envio.enviado) {
+    throw new ErrorAuth(502, 'No pudimos mandarte el correo. Intenta de nuevo en un rato.');
+  }
+  await registrarEvento('auth', correo, 'código enviado', { via: `correo:${proveedorCorreo()}` });
+
+  return {
+    enviado: true,
+    expiraEn: CONFIG.auth.vidaCodigoSegundos,
+    ...(process.env.NODE_ENV !== 'production' && proveedorCorreo() === 'consola'
+        && !opciones.ocultarCodigo
+      ? { codigoDev: codigo } : {}),
+  };
+}
+
+export async function crearSesionPorCorreo(
+  correoCrudo: unknown, codigo: string, dispositivo?: string,
+): Promise<Sesion> {
+  const correo = normalizarCorreo(correoCrudo);
+  const fila = await comprobarCodigo(correo, codigo);
+
+  return abrirSesion({
+    codigoId: fila.id,
+    telefono: null,
+    dispositivo,
+    quien: async () => {
+      const c = await consultarUno<Fila>(
+        'SELECT * FROM clientes WHERE correo_ingreso = ?', correo);
+      return c
+        ? { rol: 'cliente', id: c.id, nombre: c.nombre }
+        : nuevoCliente({ correo_ingreso: correo, email: correo });
+    },
+  });
+}
+
+// ============================================================
+// Ingreso del comprador con Google o con Apple
+// ============================================================
+
+export type IdentidadExterna = {
+  proveedor: 'google' | 'apple';
+  /** El identificador de la persona en ese proveedor. No cambia. */
+  sub: string;
+  /** Solo si el proveedor asegura que es de ella. */
+  correo: string | null;
+  nombre: string | null;
+};
+
+/**
+ * Abre la sesión de alguien que Google o Apple ya identificaron.
+ *
+ * Llega acá recién después de verificar la firma del token (ver
+ * `externo.ts`). Si esa persona ya había entrado con el mismo
+ * correo por código, es la misma cuenta: no se le crea otra.
+ */
+export async function crearSesionExterna(
+  persona: IdentidadExterna, dispositivo?: string,
+): Promise<Sesion> {
+  const columna = persona.proveedor === 'google' ? 'google_sub' : 'apple_sub';
+
+  return abrirSesion({
+    telefono: null,
+    dispositivo,
+    quien: async () => {
+      const conocido = await consultarUno<Fila>(
+        `SELECT * FROM clientes WHERE ${columna} = ?`, persona.sub);
+      if (conocido) return { rol: 'cliente', id: conocido.id, nombre: conocido.nombre };
+
+      const mismoCorreo = persona.correo
+        ? await consultarUno<Fila>(
+            'SELECT * FROM clientes WHERE correo_ingreso = ?', persona.correo)
+        : undefined;
+      if (mismoCorreo) {
+        await ejecutar(`UPDATE clientes SET ${columna} = ? WHERE id = ?`,
+          persona.sub, mismoCorreo.id);
+        return { rol: 'cliente', id: mismoCorreo.id, nombre: mismoCorreo.nombre };
+      }
+
+      return nuevoCliente({
+        [columna]: persona.sub,
+        correo_ingreso: persona.correo,
+        email: persona.correo,
+        nombre: (persona.nombre ?? '').slice(0, 80),
+      });
+    },
   });
 }
 
@@ -224,7 +448,7 @@ export async function verificarToken(token: string | undefined): Promise<Identid
     `SELECT * FROM sesiones
       WHERE token_hash = ? AND revocada_at IS NULL AND expira_at > now()`,
     hashToken(token));
-  if (!s) throw new ErrorAuth(401, 'Sesión inválida o vencida. Volvé a entrar.');
+  if (!s) throw new ErrorAuth(401, 'Sesión inválida o vencida. Vuelve a entrar.');
 
   // Marca de uso, para poder cerrar sesiones abandonadas. Se
   // actualiza como mucho una vez por hora: escribir en cada

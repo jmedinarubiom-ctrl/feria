@@ -3,8 +3,10 @@ import {
   Alert, Platform, Pressable, StatusBar, StyleSheet, Text, View,
 } from 'react-native';
 
-import { api, fijarToken, cuandoExpireLaSesion } from './src/api';
-import { leerSesion, guardarSesion, borrarSesion, type SesionGuardada } from './src/almacen';
+import { api, fijarToken, fijarServidor, cuandoExpireLaSesion, ErrorApi } from './src/api';
+import {
+  leerSesion, guardarSesion, borrarSesion, leerServidor, type SesionGuardada,
+} from './src/almacen';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { useFonts } from 'expo-font';
 import { Fredoka_600SemiBold, Fredoka_700Bold } from '@expo-google-fonts/fredoka';
@@ -25,14 +27,13 @@ import Repartidor from './src/pantallas/Repartidor';
  *
  * Feriante, repartidor y operador entran con su teléfono, y el rol
  * lo dice el servidor: nadie elige de qué lado del mostrador está.
- * El cliente es el único que no necesita sesión — en producción esa
- * parte vive en la app de Shopify, con su propio login.
+ * El cliente entra igual que todos; un número nuevo queda registrado
+ * como cliente la primera vez que confirma su código.
  */
 
 type Estado =
   | { fase: 'cargando' }
   | { fase: 'fuera' }
-  | { fase: 'cliente' }
   | { fase: 'dentro'; sesion: SesionGuardada };
 
 export default function App() {
@@ -66,6 +67,14 @@ function Raiz() {
     });
 
     void (async () => {
+      // La dirección elegida a mano va ANTES de la primera petición.
+      // Se aplicaba recién al mostrar la pantalla de ingreso: con la
+      // sesión guardada, la consulta de abajo salía a la dirección
+      // automática, fallaba, y la app echaba al usuario en cada
+      // arranque.
+      const elegido = await leerServidor();
+      if (elegido) fijarServidor(elegido);
+
       const guardada = await leerSesion();
       if (!guardada) return setEstado({ fase: 'fuera' });
 
@@ -74,10 +83,20 @@ function Raiz() {
         // El token puede haber sido revocado desde el servidor.
         const yo = await api('GET', '/auth/yo');
         setEstado({ fase: 'dentro', sesion: { ...guardada, rol: yo.rol, actorId: yo.actorId } });
-      } catch {
-        fijarToken(null);
-        await borrarSesion();
-        setEstado({ fase: 'fuera' });
+      } catch (e) {
+        // Solo un «no» del servidor borra la sesión. Antes cualquier
+        // error la borraba: abrir la app sin señal —en la feria, lo
+        // normal— dejaba al feriante afuera y pidiendo código de
+        // nuevo. Sin red se entra con lo guardado; las pantallas
+        // reintentan solas.
+        if (e instanceof ErrorApi && e.estado === 401) {
+          fijarToken(null);
+          await borrarSesion();
+          setEstado({ fase: 'fuera' });
+        } else {
+          fijarToken(guardada.token);
+          setEstado({ fase: 'dentro', sesion: guardada });
+        }
       }
     })();
   }, []);
@@ -85,7 +104,9 @@ function Raiz() {
   // El permiso se pide recién cuando la persona ya entró y sabe
   // para qué sirve, no en la pantalla de bienvenida.
   useEffect(() => {
-    if (estado.fase !== 'dentro') return;
+    // El cliente no recibe ofertas ni viajes: no se le pide permiso
+    // de notificaciones para nada.
+    if (estado.fase !== 'dentro' || estado.sesion.rol === 'cliente') return;
     void activarPush(estado.sesion.rol).then(setPush).catch(() =>
       setPush({ estado: 'no-disponible', motivo: 'No se pudo activar.' }));
     return alTocarNotificacion(() => {});
@@ -112,9 +133,6 @@ function Raiz() {
           await guardarSesion(s);
           setEstado({ fase: 'dentro', sesion: s });
         }} />
-        <Pressable onPress={() => setEstado({ fase: 'cliente' })} style={e.enlaceCliente}>
-          <Text style={[T.apoyo, { color: C.verdeOscuro }]}>Entrar como cliente (prueba)</Text>
-        </Pressable>
         </SafeAreaView>
       </View>
     );
@@ -122,11 +140,19 @@ function Raiz() {
 
   // La app del cliente trae su propia navegación, su propio fondo y
   // su propia barra: no va dentro del marco de los roles de la feria.
-  if (estado.fase === 'cliente') {
+  // El cliente entra con su teléfono igual que todos; lo que cambia
+  // es la app que ve.
+  if (estado.sesion.rol === 'cliente') {
     return (
       <>
         <StatusBar barStyle="dark-content" backgroundColor={C.superficie} />
-        <AppCliente onSalir={() => setEstado({ fase: 'fuera' })} />
+        <AppCliente
+          telefono={estado.sesion.telefono ?? ''}
+          onSalir={() => Alert.alert('Cerrar sesión', '¿Salir de tu cuenta?', [
+            { text: 'Cancelar', style: 'cancel' },
+            { text: 'Salir', style: 'destructive', onPress: () => void salir(true) },
+          ])}
+        />
       </>
     );
   }
@@ -200,7 +226,6 @@ const e = StyleSheet.create({
     flex: 1,
     paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0,
   },
-  enlaceCliente: { padding: 20, alignItems: 'center', userSelect: 'none' },
   avisoPush: {
     marginHorizontal: E.l, marginBottom: E.s,
     backgroundColor: C.naranjaSuave, borderRadius: R.chico,

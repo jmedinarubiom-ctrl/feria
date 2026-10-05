@@ -8,6 +8,7 @@
 const BASE = process.env.FERIA_API ?? 'http://localhost:4000';
 
 const TELEFONOS: Record<string, string> = {
+  'cliente': '+56999999999',
   'f-jose': '+56911111111',
   'f-ana': '+56922222222',
   'f-carmen': '+56933333333',
@@ -43,6 +44,7 @@ async function entrar(actor: string) {
 /** Crea un pedido y lo deja pagado, listo para ofertarse. */
 async function pedir(items: Array<{ productoId: string; cantidad: number }>) {
   const p = await api('POST', '/pedidos', {
+    actor: 'cliente',
     cuerpo: {
       clienteNombre: 'Juan Manuel',
       clienteTelefono: '+56999999999',
