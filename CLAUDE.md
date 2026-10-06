@@ -260,9 +260,14 @@ Auditoría del 6 de octubre (función publicada), pendientes:
 4. ~~Correo de respaldo al cliente.~~ Hecho: `dominio/comprobante.ts`
    lo manda al quedar pagado el pedido, una sola vez
    (`pedidos.comprobante_at`). No es la boleta.
-5. **Logo en alta.** El original es 266×302; el ícono de 1024 px es
-   una ampliación de 2,4×. Para publicar en tiendas hace falta el
-   archivo grande.
+5. ~~Logo en alta.~~ No apareció un original grande, así que el que
+   había (266×302) se limpió por programa: bordes nítidos, colores
+   planos, contorno en el burdeo de la marca y la hoja hueca (antes
+   tenía relleno blanco). `cd app && node herramientas/armar-logo.mjs
+   && node herramientas/generar-iconos.ts` rehace logo e íconos desde
+   `herramientas/logo-*-original.png`. Quedó en 532×604: para una
+   tienda sirve; para imprimir grande haría falta redibujarlo en
+   vectores.
 
 El APK instalado es anterior al WebSocket con token: sigue
 funcionando, pero se entera de los cambios cada 5 segundos en vez
