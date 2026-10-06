@@ -25,14 +25,39 @@ const leer = (archivo: string) => readFileSync(join(aqui, '../legal', archivo), 
  * `LEGAL_VERSION`: es lo que hace que la app los vuelva a mostrar.
  */
 export function textosLegales() {
-  const terminos = leer('terminos.md');
-  const privacidad = leer('privacidad.md');
+  const p = CONFIG.legal.proveedor;
+  const datos: Record<string, string | undefined> = {
+    VERSION: CONFIG.legal.version,
+    RAZON_SOCIAL: p.razonSocial,
+    RUT: p.rut,
+    REPRESENTANTE: p.representante,
+    DOMICILIO: p.domicilio,
+    CORREO: p.correo,
+    TELEFONO: CONFIG.telefonoContacto,
+  };
+  const NOMBRES: Record<string, string> = {
+    RAZON_SOCIAL: 'razón social', RUT: 'RUT', REPRESENTANTE: 'representante legal',
+    DOMICILIO: 'domicilio', CORREO: 'correo de contacto',
+  };
+  const faltan = new Set<string>();
+  const completar = (texto: string) => texto.replace(/\{\{([A-Z_]+)\}\}/g, (_, k: string) => {
+    if (datos[k]) return datos[k]!;
+    faltan.add(NOMBRES[k] ?? k);
+    return `[por completar: ${NOMBRES[k] ?? k}]`;
+  });
+  const terminos = completar(leer('terminos.md'));
+  const privacidad = completar(leer('privacidad.md'));
   return {
     version: CONFIG.legal.version,
     terminos,
     privacidad,
-    /** Mientras sea el borrador técnico, no un texto revisado. */
-    borrador: terminos.startsWith('BORRADOR') || privacidad.startsWith('BORRADOR'),
+    /**
+     * Faltan datos del proveedor (variables `LEGAL_*`): los textos
+     * no se pueden publicar así. El nombre viene de cuando eran un
+     * borrador técnico.
+     */
+    borrador: faltan.size > 0,
+    faltan: [...faltan],
   };
 }
 

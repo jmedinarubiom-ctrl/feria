@@ -349,17 +349,33 @@ GET('/legal/privacidad', async () => paginaLegal('Política de privacidad', text
 GET('/legal/terminos', async () => paginaLegal('Términos y condiciones', textosLegales().terminos));
 
 function paginaLegal(titulo: string, texto: string): RespuestaCruda {
-  const seguro = texto.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!));
+  const seguro = (t: string) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!));
+  // El mismo criterio que la app: párrafos, listas, capítulos y
+  // cláusulas numeradas con su nombre destacado.
+  const cuerpo = texto.trim().split(/\n\s*\n/).map((crudo, i) => {
+    const bloque = crudo.trim();
+    if (/^- /.test(bloque)) {
+      return '<ul>' + bloque.split(/\n(?=- )/).map((l) => `<li>${seguro(l.replace(/^- /, ''))}</li>`).join('') + '</ul>';
+    }
+    const b = bloque.replace(/\s*\n\s*/g, ' ');
+    if (i === 0) return `<h1>${seguro(b)}</h1>`;
+    if (/^[IVX]+\.\s/.test(b) && b.length < 70) return `<h2>${seguro(b)}</h2>`;
+    const punto = /^(\d+)\.\s+([^.]{2,60}\.)\s*(.*)$/.exec(b);
+    if (punto) return `<p><strong>${punto[1]}. ${seguro(punto[2])}</strong> ${seguro(punto[3])}</p>`;
+    return `<p>${seguro(b)}</p>`;
+  }).join('\n');
   return new RespuestaCruda(`<!doctype html>
 <html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Feria — ${titulo}</title>
+<title>Feria App — ${titulo}</title>
 <style>
-  body { font-family: system-ui, sans-serif; background: #FAFBFC; color: #1F2933;
-         max-width: 640px; margin: 0 auto; padding: 24px; line-height: 1.6; }
-  pre { white-space: pre-wrap; font: inherit; }
+  body { font-family: system-ui, sans-serif; background: #F4F6F4; color: #16211D;
+         max-width: 680px; margin: 0 auto; padding: 24px; line-height: 1.65; }
+  h1 { font-size: 24px; line-height: 1.25; margin: 0 0 16px; color: #8B2838; }
+  h2 { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: #0C5C44; margin: 32px 0 8px; }
+  p, li { font-size: 16px; } li { margin-bottom: 6px; }
 </style></head>
-<body><h1>${titulo}</h1><pre>${seguro}</pre></body></html>`, 'text/html; charset=utf-8', 'no-cache');
+<body>${cuerpo}</body></html>`, 'text/html; charset=utf-8', 'no-cache');
 }
 
 POST('/auth/aceptar-terminos', async (c) => {
@@ -1393,8 +1409,8 @@ export async function iniciar(puerto = CONFIG.puerto, opciones: { memoria?: bool
   setInterval(limpiar, 6 * 3_600_000).unref();
 
   if (process.env.NODE_ENV === 'production' && textosLegales().borrador) {
-    console.warn('[legal] Los términos y la política de privacidad son el BORRADOR técnico.\n'
-      + '        Reemplaza backend/src/legal/*.md por el texto del abogado y cambia LEGAL_VERSION.');
+    console.warn('[legal] A los términos y la política de privacidad les faltan datos del proveedor: '
+      + textosLegales().faltan.join(', ') + '.\n        Defínelos con las variables LEGAL_* (ver .env.example).');
   }
 
   // Cerrar el servidor detiene también los dos relojes.

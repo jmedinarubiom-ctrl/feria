@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { Alert, Linking, Share, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { api, servidor } from '../api';
+import { api } from '../api';
+import { TextoLegal } from '../Terminos';
 import { C, E, R, T } from '../tema';
 import { Boton } from '../ui';
 
@@ -11,6 +13,18 @@ import { Boton } from '../ui';
  */
 export default function MisDatos({ alEliminarCuenta }: { alEliminarCuenta: () => void }) {
   const [ocupado, setOcupado] = useState(false);
+  // Los textos se leen dentro de la app: abrir una página aparte
+  // saca a la persona de donde está y depende de que el servidor
+  // pueda mostrar páginas web.
+  const [legal, setLegal] = useState<{ terminos: string; privacidad: string } | null>(null);
+
+  const verLegal = async () => {
+    try {
+      setLegal(await api('GET', '/legal', { sinSesion: true }));
+    } catch (err: any) {
+      Alert.alert('No se pudieron cargar', err.message);
+    }
+  };
 
   const descargar = async () => {
     setOcupado(true);
@@ -61,13 +75,25 @@ export default function MisDatos({ alEliminarCuenta }: { alEliminarCuenta: () =>
 
   return (
     <View style={e.bloque}>
+      <Modal visible={!!legal} animationType="slide" onRequestClose={() => setLegal(null)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: C.fondo }}>
+          <ScrollView contentContainerStyle={{ padding: E.l, gap: E.xl }}>
+            {legal ? <TextoLegal texto={legal.terminos} /> : null}
+            <View style={{ height: 1, backgroundColor: C.borde }} />
+            {legal ? <TextoLegal texto={legal.privacidad} /> : null}
+          </ScrollView>
+          <View style={{ padding: E.l }}>
+            <Boton titulo="CERRAR" onPress={() => setLegal(null)} />
+          </View>
+        </SafeAreaView>
+      </Modal>
       <Text style={T.destacado}>Tus datos</Text>
       <Text style={[T.micro, { marginTop: 2, marginBottom: E.m }]}>
         Qué guardamos, para qué, y cómo llevártelo o borrarlo.
       </Text>
       <View style={{ gap: E.s }}>
         <Boton titulo="Términos y privacidad" variante="secundario"
-               onPress={() => void Linking.openURL(`${servidor()}/legal/privacidad`)} />
+               onPress={() => void verLegal()} />
         <Boton titulo="Descargar una copia de mis datos" variante="secundario"
                onPress={descargar} deshabilitado={ocupado} />
         <Boton

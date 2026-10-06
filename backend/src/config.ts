@@ -171,7 +171,23 @@ export const CONFIG = {
    * Al cambiar los textos de `src/legal/` hay que cambiar esto: la
    * app le vuelve a pedir la aceptación a todos.
    */
-  legal: { version: process.env.LEGAL_VERSION ?? '2026-10-borrador' },
+  legal: {
+    version: process.env.LEGAL_VERSION ?? '2026-10-06',
+    /**
+     * Quién es el proveedor. La ley del consumidor y el reglamento
+     * de comercio electrónico obligan a identificarlo: razón social,
+     * RUT, domicilio, representante y un correo de contacto. Mientras
+     * falte alguno, los textos lo muestran como «por completar» y se
+     * consideran incompletos.
+     */
+    proveedor: {
+      razonSocial: process.env.LEGAL_RAZON_SOCIAL,
+      rut: process.env.LEGAL_RUT,
+      representante: process.env.LEGAL_REPRESENTANTE,
+      domicilio: process.env.LEGAL_DOMICILIO,
+      correo: process.env.LEGAL_CORREO,
+    },
+  },
 
   /**
    * Cuántos días se guarda cada cosa antes de borrarla sola.

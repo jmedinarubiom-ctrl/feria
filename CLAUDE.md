@@ -99,8 +99,18 @@ Para probar como cliente: cualquier otro celular chileno, por ejemplo
   cuenta de cliente (`dominio/privacidad.ts`) quita nombre, teléfono,
   dirección y notas de sus pedidos y deja los montos: son ventas.
   Hay un test que revisa tabla por tabla que no quede nada.
-- **Los textos legales son un borrador técnico** (`backend/src/legal/`).
-  Los reemplaza un abogado; al cambiarlos se cambia `LEGAL_VERSION`.
+- **Los textos legales** (`backend/src/legal/`) se redactaron el 6 de
+  octubre de 2026 siguiendo la Ley 19.496, el Reglamento de Comercio
+  Electrónico (DS 6/2021), la Ley 19.628 y la Ley 21.719 (vigente
+  desde el 1-12-2026): 37 cláusulas de términos y 29 de privacidad.
+  No los escribió ni revisó un abogado. Los datos del proveedor van
+  en variables `LEGAL_*` (razón social, RUT, representante,
+  domicilio, correo); mientras falten, el texto dice «[por
+  completar: …]» y `textosLegales().borrador` es true. Al cambiarlos
+  se cambia `LEGAL_VERSION`. La pantalla de pago avisa que los
+  perecibles no tienen retracto, porque la ley exige decirlo antes
+  de pagar. Los términos prometen boleta electrónica y reembolso en
+  10 días hábiles: hay que cumplirlo.
 - **Los datos de las ferias vienen de ODEPA/ASOF** (Localizador
   Nacional de Ferias Libres, agosto 2025). La lista completa de la
   región —115 ferias— está en `backend/src/datos/`, como referencia;

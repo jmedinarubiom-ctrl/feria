@@ -93,12 +93,31 @@ export default function ConTerminos({ children, onSalir }: {
  * punto numerado lleva su nombre destacado.
  */
 export function TextoLegal({ texto }: { texto: string }) {
-  const bloques = texto.trim().split(/\n\s*\n/).map((b) => b.replace(/\s*\n\s*/g, ' ').trim()).filter(Boolean);
+  const crudos = texto.trim().split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
   return (
     <View style={{ gap: E.m }}>
-      {bloques.map((b, i) => {
+      {crudos.map((crudo, i) => {
+        // Una lista: cada línea que parte con «- » es un punto.
+        if (/^- /.test(crudo)) {
+          const puntos = crudo.split(/\n(?=- )/).map((l) => l.replace(/^- /, '').replace(/\s*\n\s*/g, ' '));
+          return (
+            <View key={i} style={{ gap: E.s }}>
+              {puntos.map((p, j) => (
+                <View key={j} style={{ flexDirection: 'row', gap: E.s }}>
+                  <Text style={[T.cuerpo, { color: C.verde }]}>•</Text>
+                  <Text style={[T.cuerpo, { flex: 1 }]}>{p}</Text>
+                </View>
+              ))}
+            </View>
+          );
+        }
+        const b = crudo.replace(/\s*\n\s*/g, ' ');
         if (/^BORRADOR/i.test(b)) {
           return <Text key={i} style={[T.micro, e.borrador]}>{b}</Text>;
+        }
+        // Títulos de capítulo: «I. Antecedentes generales».
+        if (/^[IVX]+\.\s/.test(b) && b.length < 70) {
+          return <Text key={i} style={[T.seccion, { marginTop: E.m, color: C.verdeOscuro }]}>{b}</Text>;
         }
         const punto = /^(\d+)\.\s+([^.]{2,60}\.)\s*(.*)$/.exec(b);
         if (punto) {
@@ -110,7 +129,7 @@ export function TextoLegal({ texto }: { texto: string }) {
           );
         }
         // Una línea corta sin punto final es un título.
-        if (b.length < 60 && !/[.:;,]$/.test(b)) {
+        if (b.length < 70 && !/[.:;,]$/.test(b)) {
           return <Text key={i} style={[T.encabezado, { marginTop: E.xs }]}>{b.replace(/^#+\s*/, '')}</Text>;
         }
         return <Text key={i} style={T.cuerpo}>{b}</Text>;

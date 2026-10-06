@@ -195,6 +195,14 @@ export default function Pago({
           te llamamos antes de cambiarlo.{'\n'}Un pedido pagado se cambia o cancela
           llamando a la feria; si se cancela, te devolvemos lo pagado.
         </Text>
+        {/* La ley exige informar ANTES del pago que no hay retracto. */}
+        <Text style={[T.micro, { textAlign: 'center', marginTop: E.s }]}>
+          Los alimentos frescos son productos perecibles: no tienen derecho a
+          retracto (art. 3° bis, Ley 19.496). Si algo llega en mal estado o
+          no es lo que pediste, te lo reponemos o te devolvemos el dinero.
+          Al pagar aceptas los Términos y la Política de Privacidad, que
+          puedes leer en tu perfil.
+        </Text>
       </ScrollView>
 
       <View style={[e.pie, { bottom: 0, paddingBottom: Math.max(inset.bottom, E.l) }]}>

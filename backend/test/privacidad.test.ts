@@ -77,10 +77,23 @@ test('los términos se aceptan una vez por versión y queda registrado', async (
   assert.equal(filas[0].rol, 'cliente');
 });
 
-test('los textos legales existen y se sabe que todavía son el borrador', () => {
+test('los textos legales existen y avisan qué datos del proveedor faltan', () => {
   const t = textosLegales();
-  assert.ok(t.terminos.length > 200 && t.privacidad.length > 200);
-  assert.equal(t.borrador, true, 'cuando el abogado los reemplace, esto pasa a false');
+  assert.ok(t.terminos.length > 2000 && t.privacidad.length > 2000);
+  // Sin las variables LEGAL_* no se pueden publicar: la ley exige
+  // identificar al proveedor.
+  assert.equal(t.borrador, true);
+  assert.ok(t.faltan.includes('RUT') && t.faltan.includes('razón social'));
+  assert.match(t.terminos, /\[por completar: RUT\]/);
+  // Lo que no depende de esas variables sí queda resuelto.
+  assert.doesNotMatch(t.terminos + t.privacidad, /\{\{/);
+  // Lo que la ley chilena obliga a informar al consumidor.
+  for (const exigido of [/retracto/i, /Garantía legal/, /SERNAC/, /19\.496/, /boleta/i]) {
+    assert.match(t.terminos, exigido);
+  }
+  for (const exigido of [/19\.628/, /21\.719/, /rectificar/i, /supresión/i, /portabilidad/i, /Plazos de conservación/]) {
+    assert.match(t.privacidad, exigido);
+  }
 });
 
 // ------------------------------------------------------------
