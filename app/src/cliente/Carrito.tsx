@@ -17,7 +17,7 @@ export default function Carrito({
   navegar: (p: string, args?: any) => void;
   volver: () => void;
 }) {
-  const { carro, fijarCantidad, vaciar, unidades } = useCliente();
+  const { carro, fijarCantidad, vaciar, unidades, feriaId } = useCliente();
   const inset = useSafeAreaInsets();
   const [catalogo, setCatalogo] = useState<any[] | null>(null);
   const [cotizacion, setCotizacion] = useState<any>(null);
@@ -25,8 +25,8 @@ export default function Carrito({
 
   useEffect(() => {
     api('GET', '/catalogo').then(setCatalogo).catch(() => {});
-    api('GET', '/feria/estado').then(setFeria).catch(() => {});
-  }, []);
+    api('GET', `/feria/estado?feria=${encodeURIComponent(feriaId)}`).then(setFeria).catch(() => {});
+  }, [feriaId]);
 
   const productos = (catalogo ?? []).flatMap((r: any) => r.productos);
   const lineas = Object.entries(carro)

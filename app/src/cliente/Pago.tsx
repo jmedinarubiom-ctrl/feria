@@ -9,6 +9,7 @@ import { Boton, Cargando } from '../ui';
 import { Campo } from './piezas';
 import { Linea } from './Carrito';
 import { useCliente, type Perfil } from './estado';
+import PuntoEntrega, { puntoVigente } from './PuntoEntrega';
 
 /**
  * Entrega y pago.
@@ -24,7 +25,9 @@ export default function Pago({
   navegar: (p: string, args?: any) => void;
   volver: () => void;
 }) {
-  const { carro, perfil, guardarPerfil, vaciar, registrarPedido, unidades } = useCliente();
+  const {
+    carro, perfil, guardarPerfil, vaciar, registrarPedido, unidades, feriaId, telefonoVerificado,
+  } = useCliente();
   const [borrador, setBorrador] = useState<Perfil>(perfil);
   const [catalogo, setCatalogo] = useState<any[] | null>(null);
   const [cotizacion, setCotizacion] = useState<any>(null);
@@ -60,13 +63,19 @@ export default function Pago({
     try {
       await guardarPerfil(borrador);
 
+      const punto = puntoVigente(borrador.punto, borrador.direccion);
       const pedido = await api('POST', '/pedidos', {
         cuerpo: {
           clienteNombre: borrador.nombre.trim(),
           clienteTelefono: borrador.telefono.trim(),
           clienteEmail: borrador.email.trim() || undefined,
           direccion: borrador.direccion.trim(),
-          lat: borrador.lat, lng: borrador.lng,
+          // El punto que marcó, si sigue siendo el de esta dirección.
+          // Sin punto marcado, el servidor ubica la dirección escrita.
+          ...(punto ? {
+            puntoMarcado: true, lat: punto.lat, lng: punto.lng, precisionM: punto.precisionM,
+          } : { lat: borrador.lat, lng: borrador.lng }),
+          feriaId,
           items: Object.entries(carro).map(([productoId, cantidad]) => ({ productoId, cantidad })),
         },
       });
@@ -119,18 +128,28 @@ export default function Pago({
               placeholder="Tu nombre"
             />
             <Campo
-              etiqueta="Teléfono"
-              value={borrador.telefono}
+              etiqueta={telefonoVerificado ? 'Teléfono (confirmado)' : 'Teléfono'}
+              value={telefonoVerificado ?? borrador.telefono}
               onChangeText={(v) => setBorrador({ ...borrador, telefono: v })}
               placeholder="+56 9 1234 5678"
               keyboardType="phone-pad"
-              ayuda="Para avisarte cuando el repartidor esté llegando."
+              // El confirmado se cambia en Perfil, con un código.
+              editable={!telefonoVerificado}
+              ayuda={telefonoVerificado
+                ? 'Es el número de tu cuenta. Se cambia en Perfil.'
+                : 'Para avisarte cuando el repartidor esté llegando.'}
             />
             <Campo
               etiqueta="Dirección"
               value={borrador.direccion}
               onChangeText={(v) => setBorrador({ ...borrador, direccion: v })}
               placeholder="Calle, número, depto"
+            />
+            <PuntoEntrega
+              direccion={borrador.direccion}
+              feriaId={feriaId}
+              punto={borrador.punto ?? null}
+              onCambio={(punto) => setBorrador({ ...borrador, punto })}
             />
             <Campo
               etiqueta="Correo (opcional)"
@@ -172,7 +191,8 @@ export default function Pago({
 
         <Text style={[T.micro, { textAlign: 'center', marginTop: E.s }]}>
           Compramos tu pedido en la feria la misma mañana. Si algo no está,
-          te llamamos antes de cambiarlo.
+          te llamamos antes de cambiarlo.{'\n'}Un pedido pagado se cambia o cancela
+          llamando a la feria; si se cancela, te devolvemos lo pagado.
         </Text>
       </ScrollView>
 

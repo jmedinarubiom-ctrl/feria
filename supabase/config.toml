@@ -1,0 +1,11 @@
+# El servidor de la feria como función de Supabase.
+# Se despliega con ./desplegar-supabase.sh (copia backend/src adentro).
+project_id = "feriapp"
+
+[functions.api]
+# La app manda su propio token en Authorization; no es un JWT de Supabase.
+verify_jwt = false
+static_files = [
+  "./functions/api/src/fotos/creditos.json",
+  "./functions/api/src/legal/*.md",
+]

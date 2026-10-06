@@ -132,6 +132,16 @@ export default function Repartidor({ repartidorId }: { repartidorId: string }) {
           {siguiente.tipo === 'ENTREGA' ? (
             <View style={{ marginTop: E.m }}>
               <Text style={T.cuerpo}>{viajeActivo.cliente_nombre}</Text>
+              {/* Si el cliente marcó el punto, el mapa lleva a la
+                  puerta. Si no, es una aproximación del buscador. */}
+              <Text style={[T.micro, {
+                marginTop: 2,
+                color: /^marcado/.test(viajeActivo.geo_precision ?? '') ? C.verdeOscuro : C.naranja,
+              }]}>
+                {/^marcado/.test(viajeActivo.geo_precision ?? '')
+                  ? `📍 Punto exacto ${viajeActivo.geo_precision}`
+                  : 'El punto del mapa es aproximado: guíate por la dirección.'}
+              </Text>
               {viajeActivo.notas ? (
                 <Text style={[T.apoyo, { marginTop: 2, fontStyle: 'italic' }]}>
                   “{viajeActivo.notas}”

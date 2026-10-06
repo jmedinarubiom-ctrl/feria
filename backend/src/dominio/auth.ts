@@ -1,4 +1,6 @@
-import { createHmac, randomBytes, randomInt, timingSafeEqual, createHash } from 'node:crypto';
+import {
+  createHmac, randomBytes, randomInt, timingSafeEqual, createHash, scryptSync,
+} from 'node:crypto';
 import { ahora, consultar, consultarUno, ejecutar, enTransaccion, id, registrarEvento, type Fila } from '../db/index.ts';
 import { enviarSms, proveedorSms } from '../sms.ts';
 import { enviarCorreo, proveedorCorreo } from '../correo.ts';
@@ -118,14 +120,20 @@ export async function pedirCodigo(
     throw new ErrorAuth(429, 'Pediste demasiados códigos. Espera unos minutos.');
   }
 
+  await frenarAdivinanzas(telefono);
+
   const quien = await quienEs(telefono);
   const esDelEquipo = !!quien && quien.rol !== 'cliente';
 
   // Al equipo el operador le puede dictar el código desde el panel;
   // a un cliente no. Sin proveedor de SMS en producción, pedirle el
   // código sería dejarlo esperando un mensaje que no va a llegar.
-  if (!esDelEquipo && process.env.NODE_ENV === 'production' && proveedorSms() === 'consola') {
-    throw new ErrorAuth(503, 'El ingreso por mensaje todavía no está disponible.');
+  // Lo mismo con el servidor de prueba abierto a internet: ahí el
+  // código no sale en pantalla.
+  if (!esDelEquipo && proveedorSms() === 'consola'
+      && (process.env.NODE_ENV === 'production' || opciones.ocultarCodigo)) {
+    throw new ErrorAuth(503,
+      'El ingreso por mensaje todavía no está disponible. Entra con tu correo o con Google.');
   }
 
   const codigo = String(randomInt(0, 1_000_000)).padStart(6, '0');
@@ -193,6 +201,9 @@ async function comprobarCodigo(destino: string, codigo: string): Promise<Fila> {
     destino);
   if (!fila) throw generico;
   if (fila.expira_at.getTime() < Date.now()) throw generico;
+  // Un código que el operador le dictó a alguien de su equipo pasa
+  // aunque el tope del día esté cumplido: es justamente la salida.
+  if (!fila.del_operador) await frenarAdivinanzas(destino);
 
   // Sin tope de intentos, seis dígitos se prueban enteros en
   // minutos. Pasado el tope el código muere, no se bloquea el
@@ -209,9 +220,97 @@ async function comprobarCodigo(destino: string, codigo: string): Promise<Fila> {
   await ejecutar('UPDATE codigos_acceso SET intentos = intentos + 1 WHERE id = ?', fila.id);
 
   if (!igualSeguro(fila.codigo_hash, hmac(destino + ':' + String(codigo ?? '').trim()))) {
+    await ejecutar('UPDATE codigos_acceso SET fallos = fallos + 1 WHERE id = ?', fila.id);
     throw generico;
   }
   return fila;
+}
+
+/**
+ * Tope de intentos fallidos por día para un mismo teléfono o correo.
+ *
+ * Cada código muere a los cinco intentos, pero se puede pedir otro:
+ * tres códigos cada quince minutos son 1.440 intentos al día contra
+ * la cuenta de una persona, y con seis dígitos eso es 1 posibilidad
+ * en 700 de acertar cada día. Para la cuenta del operador es
+ * demasiado. Con el tope, quien adivina tiene 20 intentos al día:
+ * 1 en 50.000.
+ *
+ * El costo: alguien puede dejar a otro sin poder ENTRAR por un día
+ * fallando a propósito. No le cierra las sesiones que ya tiene, y
+ * a su equipo el operador le dicta un código desde el panel.
+ */
+async function frenarAdivinanzas(destino: string): Promise<void> {
+  const r = await consultarUno<Fila>(
+    `SELECT COALESCE(SUM(fallos), 0)::int AS n FROM codigos_acceso
+      WHERE telefono = ? AND creado_at > now() - make_interval(hours => 24)`,
+    destino);
+  if ((r?.n ?? 0) >= CONFIG.auth.maxFallosPorDia) {
+    throw new ErrorAuth(429,
+      'Demasiados intentos fallidos. Por seguridad, este ingreso queda detenido hasta mañana.');
+  }
+}
+
+/**
+ * Comprueba y consume un código fuera de un inicio de sesión: para
+ * confirmar que un número es de quien dice, sin abrir otra sesión.
+ */
+export async function confirmarCodigo(destino: string, codigo: string): Promise<void> {
+  const fila = await comprobarCodigo(destino, codigo);
+  const r = await ejecutar(
+    'UPDATE codigos_acceso SET usado_at = ? WHERE id = ? AND usado_at IS NULL', ahora(), fila.id);
+  if (r.afectadas !== 1) throw new ErrorAuth(401, 'Código incorrecto o vencido.');
+}
+
+// ============================================================
+// La clave del operador: su segundo factor
+// ============================================================
+
+const hashClave = (clave: string, sal = randomBytes(16).toString('hex')): string =>
+  `scrypt$${sal}$${scryptSync(clave, sal, 32).toString('hex')}`;
+
+function claveCoincide(clave: string, guardada: string): boolean {
+  const [, sal, esperado] = guardada.split('$');
+  if (!sal || !esperado) return false;
+  return igualSeguro(scryptSync(clave, sal, 32).toString('hex'), esperado);
+}
+
+/**
+ * Pone o cambia la clave del operador.
+ *
+ * Se guarda con scrypt y sal propia: quien lea la base no la
+ * obtiene. Para cambiarla hay que saber la anterior; tener el
+ * teléfono desbloqueado en la mano no alcanza.
+ */
+export async function fijarClaveOperador(
+  operadorId: string, nueva: unknown, actual?: unknown, sesionActual?: string,
+): Promise<{ conClave: true }> {
+  const op = await consultarUno<Fila>('SELECT * FROM operadores WHERE id = ?', operadorId);
+  if (!op) throw new ErrorAuth(404, 'Operador no encontrado.');
+  if (op.clave_hash && !(typeof actual === 'string' && claveCoincide(actual, op.clave_hash))) {
+    throw new ErrorAuth(403, 'La clave actual no coincide.');
+  }
+  if (typeof nueva !== 'string' || nueva.length < 10 || nueva.length > 200) {
+    throw new ErrorAuth(422, 'La clave tiene que tener al menos 10 caracteres.');
+  }
+  await ejecutar('UPDATE operadores SET clave_hash = ? WHERE id = ?', hashClave(nueva), operadorId);
+  // Con clave nueva, las demás sesiones abiertas se cierran: si se
+  // cambió porque alguien más estaba adentro, que no siga adentro.
+  await ejecutar(
+    `UPDATE sesiones SET revocada_at = ?
+      WHERE actor_id = ? AND revocada_at IS NULL AND id <> ?`,
+    ahora(), operadorId, sesionActual ?? '');
+  await registrarEvento('auth', operadorId, op.clave_hash ? 'clave cambiada' : 'clave creada');
+  return { conClave: true };
+}
+
+/** Error de «falta la clave», para que la app muestre el campo. */
+export class FaltaClave extends ErrorAuth {
+  pideClave = true;
+  constructor(msg = 'Escribe tu clave de operador.') {
+    super(401, msg);
+    this.name = 'FaltaClave';
+  }
 }
 
 type Quien = { rol: string; id: string; nombre: string };
@@ -241,6 +340,9 @@ async function abrirSesion(datos: {
     }
 
     const quien = await datos.quien();
+    if (quien.rol === 'cliente') {
+      await ejecutar('UPDATE clientes SET ultima_actividad_at = ? WHERE id = ?', ahora(), quien.id);
+    }
     const token = randomBytes(32).toString('base64url');
     const expiraAt = new Date(Date.now() + CONFIG.auth.vidaSesionDias * 86_400_000);
     await ejecutar(
@@ -267,11 +369,110 @@ async function nuevoCliente(campos: Record<string, string | null>): Promise<Quie
   return { rol: 'cliente', id: nuevo, nombre: campos.nombre ?? '' };
 }
 
+/** «ca•••@gmail.com»: lo justo para reconocer el propio correo. */
+const taparCorreo = (correo: string): string => {
+  const [usuario, dominio] = correo.split('@');
+  return `${usuario.slice(0, 2)}•••@${dominio}`;
+};
+
+/**
+ * Falta la segunda prueba: el código que se mandó al correo.
+ *
+ * La app muestra un campo más y reenvía todo junto. `correo` va
+ * tapado: quien no es el dueño no tiene por qué enterarse de cuál es.
+ */
+export class FaltaCorreo extends ErrorAuth {
+  pideCorreo = true;
+  correo: string;
+  codigoDev?: string;
+  constructor(correo: string, msg: string, codigoDev?: string) {
+    super(401, msg);
+    this.name = 'FaltaCorreo';
+    this.correo = taparCorreo(correo);
+    this.codigoDev = codigoDev;
+  }
+}
+
+/**
+ * La segunda prueba para una cuenta que lleva meses sin usarse.
+ *
+ * Un número que nadie usa la compañía se lo entrega a otra persona,
+ * y esa persona recibe el SMS. Si la cuenta tiene un correo
+ * confirmado, el SMS solo no alcanza para volver después de mucho
+ * tiempo: hay que recibir también un código en ese correo, que el
+ * dueño nuevo del número no tiene.
+ *
+ * Solo aplica si se puede mandar el correo: sin proveedor en
+ * producción no se exige, porque dejaría afuera al dueño de verdad.
+ */
+async function pedirSegundaPrueba(telefono: string, codigoCorreo: unknown): Promise<void> {
+  const c = await consultarUno<Fila>(
+    `SELECT id, correo_ingreso FROM clientes
+      WHERE telefono = ? AND correo_ingreso IS NOT NULL
+        AND ultima_actividad_at < now() - make_interval(days => ?)`,
+    telefono, CONFIG.auth.diasParaSegundaPrueba);
+  if (!c) return;
+  if (process.env.NODE_ENV === 'production' && proveedorCorreo() === 'consola') return;
+
+  const correo: string = c.correo_ingreso;
+  if (typeof codigoCorreo === 'string' && codigoCorreo.trim()) {
+    try {
+      await confirmarCodigo(correo, codigoCorreo);
+      await registrarEvento('auth', c.id, 'segunda prueba por correo superada');
+      return;
+    } catch (e) {
+      if (e instanceof ErrorAuth && e.codigo === 429) throw e;
+      throw new FaltaCorreo(correo, 'El código del correo no es correcto o ya venció.');
+    }
+  }
+
+  // Se manda uno solo: si ya hay un código vivo para ese correo no
+  // se manda otro por cada vez que la app pregunta.
+  const vivo = await consultarUno<Fila>(
+    `SELECT id FROM codigos_acceso
+      WHERE telefono = ? AND usado_at IS NULL AND expira_at > now()`, correo);
+  let codigoDev: string | undefined;
+  if (!vivo) {
+    const nuevo = await emitirCodigo(correo);
+    const minutos = Math.round(CONFIG.auth.vidaCodigoSegundos / 60);
+    await enviarCorreo(correo, 'Confirma que eres tú',
+      `Hola:\n\nAlguien está entrando a tu cuenta de la Feria con tu teléfono después de mucho `
+      + `tiempo sin usarla. Si eres tú, escribe este código en la app: ${nuevo}\n\n`
+      + `Vence en ${minutos} minutos. Si no eres tú, no hagas nada: sin este código no pueden entrar.`);
+    if (process.env.NODE_ENV !== 'production' && proveedorCorreo() === 'consola') codigoDev = nuevo;
+    await registrarEvento('auth', c.id, 'segunda prueba por correo pedida');
+  }
+  throw new FaltaCorreo(correo,
+    'Hace tiempo que no entras. Te mandamos otro código a tu correo para confirmar que eres tú.',
+    codigoDev);
+}
+
 export async function crearSesion(
-  telefonoCrudo: string, codigo: string, dispositivo?: string,
+  telefonoCrudo: string, codigo: string, dispositivo?: string, clave?: unknown,
+  codigoCorreo?: unknown,
 ): Promise<Sesion> {
   const telefono = normalizarTelefono(telefonoCrudo);
   const fila = await comprobarCodigo(telefono, codigo);
+
+  // El código del SMS está bien. Si la cuenta lleva meses sin uso y
+  // tiene correo, falta la segunda prueba. El código del SMS no se
+  // consume todavía.
+  await pedirSegundaPrueba(telefono, codigoCorreo);
+
+  // El código está bien. Si es el operador y tiene clave, falta la
+  // otra mitad. El código NO se consume todavía: la app muestra el
+  // campo de la clave y manda las dos cosas juntas.
+  const op = await consultarUno<Fila>(
+    'SELECT id, clave_hash FROM operadores WHERE telefono = ?', telefono);
+  if (op?.clave_hash) {
+    if (typeof clave !== 'string' || !clave) throw new FaltaClave();
+    if (!claveCoincide(clave, op.clave_hash)) {
+      // Cuenta contra el tope del día, igual que un código malo.
+      await ejecutar('UPDATE codigos_acceso SET fallos = fallos + 1 WHERE id = ?', fila.id);
+      await registrarEvento('auth', op.id, 'clave incorrecta', { dispositivo });
+      throw new FaltaClave('Clave incorrecta.');
+    }
+  }
 
   return abrirSesion({
     codigoId: fila.id,
@@ -345,9 +546,14 @@ export async function pedirCodigoPorCorreo(
 
   const codigo = await emitirCodigo(correo);
   const minutos = Math.round(CONFIG.auth.vidaCodigoSegundos / 60);
-  const envio = await enviarCorreo(correo, `${codigo} es tu código de la Feria`,
-    `Tu código para entrar a la Feria es ${codigo}.\n\nVence en ${minutos} minutos. `
-    + 'Si no lo pediste tú, no hagas nada: sin el código nadie puede entrar.');
+  // El asunto no parte con el número: un asunto que es casi puro
+  // código es una de las cosas que mandan un correo a spam.
+  const envio = await enviarCorreo(correo, 'Tu código para entrar a la Feria',
+    `Hola:\n\nTu código para entrar a Feria App es ${codigo}.\n\n`
+    + `Escríbelo en la app. Vence en ${minutos} minutos.\n\n`
+    + 'Si no lo pediste tú, no hagas nada: sin el código nadie puede entrar a tu cuenta.\n\n'
+    + 'Feria App · tu feria libre, a domicilio',
+    correoDeCodigo(codigo, minutos));
   if (!envio.enviado) {
     throw new ErrorAuth(502, 'No pudimos mandarte el correo. Intenta de nuevo en un rato.');
   }
@@ -360,6 +566,21 @@ export async function pedirCodigoPorCorreo(
         && !opciones.ocultarCodigo
       ? { codigoDev: codigo } : {}),
   };
+}
+
+/** La versión con formato del correo del código. */
+function correoDeCodigo(codigo: string, minutos: number): string {
+  return `<!doctype html>
+<html lang="es"><body style="margin:0;background:#FAFBFC;font-family:Arial,Helvetica,sans-serif;color:#1F2933">
+<div style="max-width:440px;margin:0 auto;padding:32px 24px">
+  <p style="font-size:18px;font-weight:bold;margin:0 0 16px">Feria App</p>
+  <p style="font-size:15px;line-height:1.5;margin:0 0 20px">Hola, este es tu código para entrar a la app:</p>
+  <p style="font-size:34px;font-weight:bold;letter-spacing:6px;margin:0 0 20px;padding:16px;
+            background:#FFFFFF;border:1px solid #E4E7EB;border-radius:12px;text-align:center">${codigo}</p>
+  <p style="font-size:15px;line-height:1.5;margin:0 0 20px">Escríbelo en la app. Vence en ${minutos} minutos.</p>
+  <p style="font-size:13px;line-height:1.5;color:#52606D;margin:0">Si no lo pediste tú, no hagas nada:
+     sin el código nadie puede entrar a tu cuenta.</p>
+</div></body></html>`;
 }
 
 export async function crearSesionPorCorreo(
@@ -450,11 +671,22 @@ export async function verificarToken(token: string | undefined): Promise<Identid
     hashToken(token));
   if (!s) throw new ErrorAuth(401, 'Sesión inválida o vencida. Vuelve a entrar.');
 
+  // Una sesión que nadie usa hace semanas es la de un teléfono
+  // perdido, vendido o regalado. Se cierra sola.
+  const ultima = (s.ultima_at ?? s.creada_at).getTime();
+  if (Date.now() - ultima > CONFIG.auth.diasSinUso * 86_400_000) {
+    await ejecutar('UPDATE sesiones SET revocada_at = ? WHERE id = ?', ahora(), s.id);
+    throw new ErrorAuth(401, 'La sesión se cerró por no usarse. Vuelve a entrar.');
+  }
+
   // Marca de uso, para poder cerrar sesiones abandonadas. Se
   // actualiza como mucho una vez por hora: escribir en cada
   // petición sería una escritura por cada refresco de pantalla.
   if (!s.ultima_at || Date.now() - s.ultima_at.getTime() > 3_600_000) {
     await ejecutar('UPDATE sesiones SET ultima_at = ? WHERE id = ?', ahora(), s.id);
+    if (s.rol === 'cliente') {
+      await ejecutar('UPDATE clientes SET ultima_actividad_at = ? WHERE id = ?', ahora(), s.actor_id);
+    }
   }
 
   return { rol: s.rol, actorId: s.actor_id, sesionId: s.id };
@@ -519,8 +751,8 @@ export async function codigoParaAlguien(
       'UPDATE codigos_acceso SET usado_at = ? WHERE telefono = ? AND usado_at IS NULL',
       ahora(), telefono);
     await ejecutar(
-      `INSERT INTO codigos_acceso (id, telefono, codigo_hash, expira_at)
-       VALUES (?, ?, ?, ?)`,
+      `INSERT INTO codigos_acceso (id, telefono, codigo_hash, expira_at, del_operador)
+       VALUES (?, ?, ?, ?, true)`,
       id(), telefono, hmac(telefono + ':' + codigo), expira);
   });
 

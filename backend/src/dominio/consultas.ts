@@ -66,7 +66,8 @@ export async function viajesDisponibles(feriaId?: string) {
 
 export async function viajeActivo(repartidorId: string) {
   const viaje = await consultarUno<Fila>(
-    `SELECT v.*, p.numero, p.cliente_nombre, p.cliente_telefono, p.direccion, p.notas
+    `SELECT v.*, p.numero, p.cliente_nombre, p.cliente_telefono, p.direccion, p.notas,
+            p.geo_precision
        FROM viajes v JOIN pedidos p ON p.id = v.pedido_id
       WHERE v.repartidor_id = ? AND v.estado IN (?, ?, ?)`,
     repartidorId, EstadoViaje.ASIGNADO, EstadoViaje.RETIRANDO, EstadoViaje.EN_RUTA);

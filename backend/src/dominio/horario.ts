@@ -24,6 +24,12 @@ type Horario = {
 };
 
 let horario: Horario = CONFIG.horario;
+/**
+ * El horario se forzó a mano (tests, o `FERIA_SIEMPRE_ABIERTA`).
+ * Mientras esté forzado vale para todas las ferias: lo que se quiere
+ * es poder probar un martes, sea la feria que sea.
+ */
+let forzado = false;
 
 /**
  * Interruptor de desarrollo: abre la feria todos los días.
@@ -35,13 +41,23 @@ let horario: Horario = CONFIG.horario;
  */
 if (process.env.FERIA_SIEMPRE_ABIERTA === '1' && process.env.NODE_ENV !== 'production') {
   horario = { dias: [0, 1, 2, 3, 4, 5, 6], abre: '00:00', ultimoPedido: '23:59', cierra: '23:59' };
+  forzado = true;
   console.log('[horario] FERIA_SIEMPRE_ABIERTA: la feria acepta pedidos a cualquier hora.');
 }
 
 /** Permite abrir la feria en los tests sin apagar la verificación. */
 export const fijarHorario = (h: Partial<Horario>): void => {
   horario = { ...horario, ...h };
+  forzado = true;
 };
+
+/** El horario de una feria de la tabla `ferias`. */
+export function horarioDeFeria(f: {
+  dias: number[]; abre: string; ultimo_pedido: string; cierra: string;
+}): Horario {
+  if (forzado) return horario;
+  return { dias: f.dias, abre: f.abre, ultimoPedido: f.ultimo_pedido, cierra: f.cierra };
+}
 export const horarioActual = (): Horario => horario;
 
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
@@ -80,7 +96,8 @@ export type EstadoFeria = {
   proxima: { dia: string; hora: string } | null;
 };
 
-export function estadoFeria(cuando = new Date()): EstadoFeria {
+export function estadoFeria(cuando = new Date(), de: Horario = horario): EstadoFeria {
+  const horario = de;
   const { dia, minutos } = momentoLocal(cuando);
   const abre = enMinutos(horario.abre);
   const ultimo = enMinutos(horario.ultimoPedido);
@@ -100,7 +117,7 @@ export function estadoFeria(cuando = new Date()): EstadoFeria {
     };
   }
 
-  const proxima = proximaApertura(dia, minutos, abre);
+  const proxima = proximaApertura(horario, dia, minutos, abre);
   const mensaje = abierta
     // Todavía hay feria pero ya no da el tiempo para entregar.
     ? `Ya no alcanzamos a repartir hoy. ${textoProxima(proxima)}`
@@ -109,7 +126,7 @@ export function estadoFeria(cuando = new Date()): EstadoFeria {
   return { abierta, aceptandoPedidos: false, minutosParaCerrar: null, mensaje, proxima };
 }
 
-function proximaApertura(dia: number, minutos: number, abre: number) {
+function proximaApertura(horario: Horario, dia: number, minutos: number, abre: number) {
   for (let adelanto = 0; adelanto <= 7; adelanto++) {
     const d = (dia + adelanto) % 7;
     if (!horario.dias.includes(d)) continue;
@@ -124,7 +141,7 @@ const textoProxima = (p: { dia: string; hora: string } | null): string =>
   p ? `Abrimos ${p.dia === 'hoy' ? 'hoy' : 'el ' + p.dia} a las ${p.hora}.` : '';
 
 /** Lanza si la feria no está tomando pedidos. */
-export function verificarHorario(cuando = new Date()): void {
-  const e = estadoFeria(cuando);
+export function verificarHorario(cuando = new Date(), de?: Horario): void {
+  const e = estadoFeria(cuando, de);
   if (!e.aceptandoPedidos) throw new FeriaCerrada(e.mensaje);
 }

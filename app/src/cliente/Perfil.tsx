@@ -9,10 +9,16 @@ import { useRecurso } from './cargar';
 import { useCliente, type Perfil as DatosPerfil } from './estado';
 import { textoHorario, textoUltimoPedido } from './horario';
 import Postular from './Postular';
+import MisDatos from './MisDatos';
+import TelefonoCuenta from './TelefonoCuenta';
 
 /** Datos de entrega y contacto de la feria. */
-export default function Perfil({ onSalir }: { onSalir: () => void }) {
-  const { perfil, guardarPerfil, misPedidos } = useCliente();
+export default function Perfil({ onSalir, alEliminarCuenta }: {
+  onSalir: () => void;
+  /** La cuenta ya no existe: salir sin preguntar. */
+  alEliminarCuenta: () => void;
+}) {
+  const { perfil, guardarPerfil, misPedidos, feriaId, telefonoVerificado } = useCliente();
   const [borrador, setBorrador] = useState<DatosPerfil>(perfil);
   const [guardado, setGuardado] = useState(false);
   const [feria, setFeria] = useState<any>(null);
@@ -21,7 +27,9 @@ export default function Perfil({ onSalir }: { onSalir: () => void }) {
   const [verCreditos, setVerCreditos] = useState(false);
 
   useEffect(() => { setBorrador(perfil); }, [perfil]);
-  useEffect(() => { api('GET', '/feria/estado').then(setFeria).catch(() => {}); }, []);
+  useEffect(() => {
+    api('GET', `/feria/estado?feria=${encodeURIComponent(feriaId)}`).then(setFeria).catch(() => {});
+  }, [feriaId]);
 
   const cambiado = JSON.stringify(borrador) !== JSON.stringify(perfil);
 
@@ -58,13 +66,18 @@ export default function Perfil({ onSalir }: { onSalir: () => void }) {
             onChangeText={(v) => { setBorrador({ ...borrador, nombre: v }); setGuardado(false); }}
             placeholder="Tu nombre"
           />
-          <Campo
-            etiqueta="Teléfono de contacto"
-            value={borrador.telefono}
-            onChangeText={(v) => { setBorrador({ ...borrador, telefono: v }); setGuardado(false); }}
-            placeholder="+56 9 1234 5678"
-            keyboardType="phone-pad"
-          />
+          <TelefonoCuenta />
+          {/* Sin número confirmado (entró con correo o con Google)
+              se puede dejar uno de contacto, que no está comprobado. */}
+          {!telefonoVerificado ? (
+            <Campo
+              etiqueta="Teléfono de contacto (sin confirmar)"
+              value={borrador.telefono}
+              onChangeText={(v) => { setBorrador({ ...borrador, telefono: v }); setGuardado(false); }}
+              placeholder="+56 9 1234 5678"
+              keyboardType="phone-pad"
+            />
+          ) : null}
           <Campo
             etiqueta="Dirección"
             value={borrador.direccion}
@@ -91,7 +104,7 @@ export default function Perfil({ onSalir }: { onSalir: () => void }) {
 
       {feria ? (
         <View style={e.bloque}>
-          <Text style={[T.destacado, { marginBottom: E.s }]}>La feria</Text>
+          <Text style={[T.destacado, { marginBottom: E.s }]}>{feria.nombre ?? 'La feria'}</Text>
           <Dato rotulo="Horario" valor={textoHorario(feria.horario)} />
           <Dato rotulo="Pedidos" valor={textoUltimoPedido(feria.horario)} />
           <Dato rotulo="Hoy" valor={feria.aceptandoPedidos ? 'Tomando pedidos' : (feria.mensaje ?? 'Cerrada')} />
@@ -131,6 +144,8 @@ export default function Perfil({ onSalir }: { onSalir: () => void }) {
       ) : null}
 
       <Postular />
+
+      <MisDatos alEliminarCuenta={alEliminarCuenta} />
 
       <Boton titulo="Cerrar sesión" variante="secundario" onPress={onSalir} />
     </ScrollView>

@@ -18,6 +18,7 @@ import Producto from './Producto';
 import Carrito from './Carrito';
 import Pago from './Pago';
 import Seguimiento from './Seguimiento';
+import ConPerfil from './CrearPerfil';
 
 /**
  * La app del cliente.
@@ -91,7 +92,9 @@ function Barra({ state, navigation }: BottomTabBarProps) {
   );
 }
 
-function Pestanas({ onSalir }: { onSalir: () => void }) {
+function Pestanas({ onSalir, alEliminarCuenta }: {
+  onSalir: () => void; alEliminarCuenta: () => void;
+}) {
   return (
     <Tabs.Navigator
       tabBar={(p) => <Barra {...p} />}
@@ -107,23 +110,26 @@ function Pestanas({ onSalir }: { onSalir: () => void }) {
         {({ navigation }) => <Pedidos navegar={(p, a) => navigation.navigate(p as never, a as never)} />}
       </Tabs.Screen>
       <Tabs.Screen name="Perfil">
-        {() => <PerfilPantalla onSalir={onSalir} />}
+        {() => <PerfilPantalla onSalir={onSalir} alEliminarCuenta={alEliminarCuenta} />}
       </Tabs.Screen>
     </Tabs.Navigator>
   );
 }
 
-export default function AppCliente({ onSalir, telefono }: {
-  onSalir: () => void; telefono: string;
+export default function AppCliente({ onSalir, alEliminarCuenta, telefono, cuentaId }: {
+  onSalir: () => void; alEliminarCuenta: () => void; telefono: string; cuentaId: string;
 }) {
   return (
-    <ProveedorCliente telefono={telefono}>
+    // `key`: al cambiar de cuenta se arma todo de nuevo, sin restos
+    // del carro ni del perfil de la anterior.
+    <ProveedorCliente key={cuentaId} telefono={telefono} cuentaId={cuentaId}>
       <NavigationContainer>
         {/* Arriba, una sola vez para toda la app: sin esto el saludo
             queda debajo del reloj. Abajo lo resuelve cada pantalla,
             porque la barra de pestañas y los botones flotantes no se
             separan del borde con la misma medida. */}
         <SafeAreaView style={{ flex: 1, backgroundColor: C.fondo }} edges={['top']}>
+        <ConPerfil onSalir={onSalir}>
         <Stack.Navigator
           screenOptions={{
             headerShown: false,
@@ -131,7 +137,7 @@ export default function AppCliente({ onSalir, telefono }: {
           }}
         >
           <Stack.Screen name="Pestanas">
-            {() => <Pestanas onSalir={onSalir} />}
+            {() => <Pestanas onSalir={onSalir} alEliminarCuenta={alEliminarCuenta} />}
           </Stack.Screen>
 
           <Stack.Screen name="Categoria">
@@ -186,6 +192,7 @@ export default function AppCliente({ onSalir, telefono }: {
             )}
           </Stack.Screen>
         </Stack.Navigator>
+        </ConPerfil>
         </SafeAreaView>
       </NavigationContainer>
     </ProveedorCliente>

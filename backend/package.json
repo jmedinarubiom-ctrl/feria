@@ -14,14 +14,17 @@
     "demo": "node --env-file-if-exists=.env src/demo.ts",
     "migrar": "node -e \"import('./src/db/index.ts').then(async m => { await m.abrirDB(); console.log('esquema aplicado en', m.nombreMotor()); await m.cerrarDB(); })\"",
     "reset": "rm -rf datos && echo 'base local borrada, se resiembra al arrancar'",
-    "escenario": "node src/escenario.ts"
+    "escenario": "node src/escenario.ts",
+    "probar-correo": "node --env-file-if-exists=.env src/probar-correo.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
+    "nodemailer": "^6.10.1",
     "pg": "^8.23.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1"
   }
 }

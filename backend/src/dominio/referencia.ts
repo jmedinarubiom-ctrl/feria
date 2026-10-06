@@ -26,7 +26,7 @@ type Credito = {
   pagina: string;
 };
 
-/** Se lee una vez al arrancar: son dieciséis archivos que no cambian. */
+/** Se lee una vez al arrancar: son unas decenas de archivos que no cambian. */
 const indice: Map<string, { archivo: string; mime: string }> = (() => {
   const m = new Map<string, { archivo: string; mime: string }>();
   if (!existsSync(CARPETA)) return m;

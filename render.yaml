@@ -105,11 +105,12 @@ services:
         sync: false
       - key: TWILIO_FROM
         sync: false
-      # Ingreso del comprador con código al correo (resend.com). Sin
-      # estas dos, ese ingreso queda apagado.
-      - key: RESEND_API_KEY
+      # Ingreso del comprador con código al correo. Una cuenta de
+      # Gmail y su «contraseña de aplicación». Sin estas dos, ese
+      # ingreso queda apagado.
+      - key: CORREO_SMTP_USUARIO
         sync: false
-      - key: CORREO_REMITENTE
+      - key: CORREO_SMTP_CLAVE
         sync: false
       # Ingreso del comprador con Google y con Apple. Vacío = sin
       # ese botón. Ver DESPLEGAR.md.

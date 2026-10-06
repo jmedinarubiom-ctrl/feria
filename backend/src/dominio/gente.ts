@@ -65,6 +65,8 @@ const cerrarSesionesDelTelefono = (telefono: string) => ejecutar(
 
 export type DatosFeriante = {
   nombre?: string; puesto?: string; telefono?: string; rubros?: string[]; activo?: boolean;
+  /** En qué feria tiene el puesto. */
+  feriaId?: string;
   /** `false` rechaza una solicitud: queda cargado, inactivo. */
   pendiente?: boolean;
 };
@@ -81,6 +83,9 @@ export async function crearFeriante(
     const puesto = texto(datos.puesto, 'el puesto');
     const telefono = await telefonoLibre(datos.telefono);
     const rubros = await rubrosValidos(datos.rubros);
+    if (!await consultarUno('SELECT id FROM ferias WHERE id = ?', feriaId)) {
+      throw new ErrorNegocio(422, 'Elige en qué feria tiene el puesto.');
+    }
 
     const nuevo = 'f-' + id().slice(0, 8);
     // Entra en pausa: empieza a recibir pedidos cuando él mismo
@@ -112,11 +117,15 @@ export async function actualizarFeriante(ferianteId: string, datos: DatosFeriant
     const activo = datos.activo ?? actual.activo;
     // Aprobar o rechazar una solicitud la saca de pendientes.
     const pendiente = activo ? false : (datos.pendiente ?? actual.pendiente);
+    const feriaId = datos.feriaId ?? actual.feria_id;
+    if (!await consultarUno('SELECT id FROM ferias WHERE id = ?', feriaId)) {
+      throw new ErrorNegocio(422, 'No conocemos esa feria.');
+    }
 
     await ejecutar(
       `UPDATE feriantes SET nombre = ?, puesto = ?, telefono = ?, activo = ?, pendiente = ?,
-              conectado = conectado AND ? WHERE id = ?`,
-      nombre, puesto, telefono, activo, pendiente, activo, ferianteId);
+              feria_id = ?, conectado = conectado AND ? WHERE id = ?`,
+      nombre, puesto, telefono, activo, pendiente, feriaId, activo, ferianteId);
 
     if (datos.rubros !== undefined) {
       const rubros = await rubrosValidos(datos.rubros);
@@ -243,8 +252,11 @@ export async function solicitudDe(telefono: string) {
  */
 export async function postular(
   telefono: string,
-  datos: { tipo?: string; nombre?: string; puesto?: string; rubros?: string[]; vehiculo?: string },
-  feriaId: string,
+  datos: {
+    tipo?: string; nombre?: string; puesto?: string; rubros?: string[]; vehiculo?: string;
+    feriaId?: string;
+  },
+  feriaPorDefecto: string,
 ) {
   const previa = await solicitudDe(telefono);
   if (previa) {
@@ -254,7 +266,7 @@ export async function postular(
           : 'Tu registro anterior está cerrado. Habla con la operación.');
   }
   if (datos.tipo === 'feriante') {
-    await crearFeriante({ ...datos, telefono }, feriaId, { solicitud: true });
+    await crearFeriante({ ...datos, telefono }, datos.feriaId ?? feriaPorDefecto, { solicitud: true });
   } else if (datos.tipo === 'repartidor') {
     await crearRepartidor({ ...datos, telefono }, { solicitud: true });
   } else {
@@ -267,15 +279,48 @@ export async function postular(
 // Clientes
 // ============================================================
 
+/**
+ * Confirma un número para la cuenta de un cliente.
+ *
+ * El código ya se comprobó (ver la ruta): acá el número pasa a ser
+ * el teléfono confirmado de la cuenta. No puede ser el de otra
+ * persona —ni cliente ni del equipo—: con ese número se entra, y
+ * dos cuentas con el mismo serían la misma.
+ */
+export async function fijarTelefonoDeCliente(clienteId: string, telefono: string) {
+  const deOtro = await consultarUno<Fila>(
+    `SELECT id FROM clientes WHERE telefono = ? AND id <> ?
+     UNION ALL SELECT id FROM feriantes WHERE telefono = ?
+     UNION ALL SELECT id FROM repartidores WHERE telefono = ?
+     UNION ALL SELECT id FROM operadores WHERE telefono = ?`,
+    telefono, clienteId, telefono, telefono, telefono);
+  if (deOtro) {
+    throw new ErrorNegocio(409, 'Ese número ya tiene una cuenta. Para usarla, entra con ese número.');
+  }
+  await ejecutar(
+    'UPDATE clientes SET telefono = ?, telefono_contacto = NULL WHERE id = ?', telefono, clienteId);
+  await registrarEvento('cliente', clienteId, 'teléfono confirmado');
+  return { telefono, verificado: true };
+}
+
 /** Guarda los datos de entrega para la próxima compra. */
 export async function guardarPerfilCliente(
-  clienteId: string, datos: { nombre?: unknown; email?: unknown; direccion?: unknown },
+  clienteId: string,
+  datos: { nombre?: unknown; email?: unknown; direccion?: unknown; telefonoContacto?: unknown },
 ) {
   const corto = (v: unknown, max: number) =>
     (typeof v === 'string' ? v.trim().slice(0, max) : '');
+  // El teléfono de contacto solo se pisa si viene uno: guardar la
+  // dirección no puede borrarle el número a nadie. Y solo existe
+  // para quien NO tiene un número confirmado: el confirmado no se
+  // cambia escribiendo otro en un campo, se cambia confirmando el
+  // nuevo con un código (`fijarTelefonoDeCliente`).
   await ejecutar(
-    'UPDATE clientes SET nombre = ?, email = ?, direccion = ? WHERE id = ?',
+    `UPDATE clientes SET nombre = ?, email = ?, direccion = ?,
+            telefono_contacto = CASE WHEN telefono IS NULL
+                                     THEN COALESCE(?, telefono_contacto) END
+      WHERE id = ?`,
     corto(datos.nombre, 80), corto(datos.email, 120) || null,
-    corto(datos.direccion, 200) || null, clienteId);
+    corto(datos.direccion, 200) || null, corto(datos.telefonoContacto, 30) || null, clienteId);
   return consultarUno<Fila>('SELECT * FROM clientes WHERE id = ?', clienteId);
 }

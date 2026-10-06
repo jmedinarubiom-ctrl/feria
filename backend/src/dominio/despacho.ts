@@ -8,7 +8,7 @@ import {
 } from './estados.ts';
 import { publicar } from '../realtime/bus.ts';
 import { crearViaje, sincronizarParadas } from './reparto.ts';
-import { verificarHorario } from './horario.ts';
+import { verificarHorario, horarioDeFeria } from './horario.ts';
 import { geocodificar } from './geocodificar.ts';
 
 // ============================================================
@@ -83,6 +83,13 @@ export type PedidoEntrante = {
   direccion: string;
   lat: number;
   lng: number;
+  /**
+   * El cliente marcó el punto de entrega él mismo (GPS o mapa).
+   * Entonces `lat`/`lng` SON el punto, y no se busca la dirección.
+   */
+  puntoMarcado?: boolean;
+  /** Margen de error del GPS al marcarlo, en metros. */
+  precisionM?: number;
   notas?: string | null;
   items: ItemEntrante[];
 };
@@ -131,6 +138,32 @@ export function cotizar(totalProductos: number) {
  * que un pedido mixto SIEMPRE requiere varios puestos.
  */
 /**
+ * El punto que marcó el cliente, validado.
+ *
+ * Tiene que caer dentro de la Región de Valparaíso: un punto en
+ * otra parte es un GPS que todavía no agarró señal (0, 0 cae en el
+ * Atlántico) o alguien probando, y mandar al repartidor ahí es peor
+ * que no tener punto.
+ */
+function puntoDelCliente(entrada: PedidoEntrante): { lat: number; lng: number; precision: string } {
+  const { lat, lng } = entrada;
+  // Un contorno grueso de la región. Hacia el sur el borde este se
+  // corre al oeste, para dejar afuera a Santiago, que queda a la
+  // misma altura que San Antonio. No es un límite comunal exacto:
+  // es un filtro contra puntos absurdos.
+  const enLaRegion = Number.isFinite(lat) && Number.isFinite(lng)
+    && lat > -34.0 && lat < -32.0 && lng > -72.0
+    && lng < (lat < -33.15 ? -71.0 : -70.3);
+  if (!enLaRegion) {
+    throw new ErrorNegocio(422,
+      'El punto marcado queda fuera de la zona de reparto. Márcalo de nuevo estando en el lugar.');
+  }
+  const m = Number(entrada.precisionM);
+  const margen = Number.isFinite(m) && m > 0 && m < 5000 ? ` (±${Math.round(m)} m)` : '';
+  return { lat, lng, precision: `marcado por el cliente${margen}` };
+}
+
+/**
  * Revisa lo que llega antes de tocar la base.
  *
  * El alta de pedidos es pública —el cliente no tiene cuenta—, así
@@ -169,9 +202,17 @@ function validarEntrada(entrada: PedidoEntrante): void {
 
 export async function crearPedido(entrada: PedidoEntrante): Promise<{ pedidoId: string; numero: number }> {
   validarEntrada(entrada);
+  // El pedido es de UNA feria: de ahí salen su horario, los
+  // feriantes a los que se ofrece y la ciudad donde se busca la
+  // dirección.
+  const feria = await consultarUno<Fila>('SELECT * FROM ferias WHERE id = ?', entrada.feriaId);
+  if (!feria) throw new ErrorNegocio(422, 'No conocemos esa feria.');
+  if (!feria.activa) {
+    throw new ErrorNegocio(422, `Todavía no repartimos desde ${feria.nombre}.`);
+  }
   // Un pedido fuera de horario no tiene a quién ofrecerse: no hay
   // ni un puesto abierto en toda la feria.
-  verificarHorario();
+  verificarHorario(new Date(), horarioDeFeria(feria));
 
   // El punto lo decide el servidor a partir de la dirección escrita,
   // no la app: antes llegaba siempre el mismo par de coordenadas y
@@ -179,7 +220,14 @@ export async function crearPedido(entrada: PedidoEntrante): Promise<{ pedidoId: 
   // la transacción porque es una llamada a otro servicio, y si falla
   // el pedido entra igual con el punto de la feria — no poder
   // comprar es peor que un punto impreciso.
-  const ubicado = await geocodificar(entrada.direccion);
+  // Un punto que marcó el cliente parado en su puerta es mejor que
+  // cualquier cosa que un buscador deduzca de la dirección escrita:
+  // se usa tal cual. Antes no se le creía a la app porque mandaba
+  // siempre el mismo par de coordenadas fijo; esto es otra cosa, es
+  // un dato que la persona dio a propósito.
+  const marcado = entrada.puntoMarcado ? puntoDelCliente(entrada) : null;
+  const ubicado = marcado
+    ?? await geocodificar(entrada.direccion, { ciudad: `${feria.comuna}, Chile` });
   const punto = ubicado
     ?? (Number.isFinite(entrada.lat) && Number.isFinite(entrada.lng)
         ? { lat: entrada.lat, lng: entrada.lng, precision: 'informada por la app' }

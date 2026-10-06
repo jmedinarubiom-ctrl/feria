@@ -128,6 +128,17 @@ export const CONFIG = {
     /** Sesión larga: al feriante no se le puede pedir que entre
      *  de nuevo cada semana. */
     vidaSesionDias: 90,
+    /** Intentos fallidos por día contra un mismo teléfono o correo. */
+    maxFallosPorDia: 20,
+    /** Días sin usar una sesión antes de que se cierre sola. */
+    diasSinUso: 30,
+    /**
+     * Días sin usar la cuenta tras los cuales, al entrar con el
+     * teléfono, se pide además un código al correo confirmado (si
+     * la cuenta tiene uno). Es la defensa contra un número que la
+     * compañía le entregó a otra persona.
+     */
+    diasParaSegundaPrueba: Number(process.env.DIAS_SEGUNDA_PRUEBA ?? 90),
   },
 
   /** A dónde llama el cliente que necesita cambiar o cancelar un pedido. */
@@ -153,6 +164,33 @@ export const CONFIG = {
   },
 
   puerto: Number(process.env.PORT ?? 4000),
+
+  /**
+   * La versión de los términos y de la política de privacidad.
+   *
+   * Al cambiar los textos de `src/legal/` hay que cambiar esto: la
+   * app le vuelve a pedir la aceptación a todos.
+   */
+  legal: { version: process.env.LEGAL_VERSION ?? '2026-10-borrador' },
+
+  /**
+   * Cuántos días se guarda cada cosa antes de borrarla sola.
+   *
+   * Lo que no se guarda no se puede filtrar. Los pedidos pagados no
+   * están acá: son ventas y se conservan por obligación tributaria.
+   */
+  retencion: {
+    ubicacionesDias: Number(process.env.RETENCION_UBICACIONES_DIAS ?? 30),
+    codigosDias: 1,
+    sesionesCerradasDias: 30,
+    pedidosSinPagarDias: 30,
+    /**
+     * Días sin uso tras los cuales la cuenta de un cliente se vacía
+     * sola (como si la hubiera eliminado). Una cuenta abandonada es
+     * la que hereda quien recibe un número reasignado.
+     */
+    cuentasInactivasDias: Number(process.env.RETENCION_CUENTAS_INACTIVAS_DIAS ?? 365),
+  },
 
   /**
    * Dónde viven la base y las fotos de producto.

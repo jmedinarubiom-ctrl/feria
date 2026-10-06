@@ -33,9 +33,22 @@ export function deQuien(req: {
   socket?: { remoteAddress?: string };
 }): string {
   const reenviada = req.headers['x-forwarded-for'];
-  const cadena = Array.isArray(reenviada) ? reenviada[0] : reenviada;
-  const primera = cadena?.split(',')[0]?.trim();
-  return primera || req.socket?.remoteAddress || 'desconocida';
+  const cadena = Array.isArray(reenviada) ? reenviada.join(',') : reenviada;
+  const lista = (cadena ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+
+  // `x-forwarded-for` lo puede escribir cualquiera: quien manda la
+  // petición pone ahí lo que quiera y cada proxy agrega la suya al
+  // FINAL. Con `PROXIES_DE_CONFIANZA` (cuántos proxies propios hay
+  // adelante: 1 en casi todos los hostings) se toma la que escribió
+  // el proxy y no la que inventó el cliente; sin eso, cambiando esa
+  // cabecera en cada petición se esquiva el freno entero.
+  const proxies = Number(process.env.PROXIES_DE_CONFIANZA);
+  if (Number.isInteger(proxies) && proxies > 0) {
+    return lista[lista.length - proxies] || req.socket?.remoteAddress || 'desconocida';
+  }
+  // Sin configurar se conserva lo de siempre (la primera), que
+  // funciona en desarrollo y detrás del túnel.
+  return lista[0] || req.socket?.remoteAddress || 'desconocida';
 }
 
 /** Devuelve cuántos segundos faltan para poder reintentar, o 0. */

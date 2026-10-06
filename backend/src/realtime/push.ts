@@ -218,7 +218,7 @@ export function iniciarNotificaciones(): void {
   enganchado = true;
 
   bus.on('mensaje', (m) => {
-    void (async () => {
+    const envio = (async () => {
       try {
         if (m.tipo === 'oferta:nueva') {
           const aviso = await avisoDeOferta(m);
@@ -232,5 +232,8 @@ export function iniciarNotificaciones(): void {
         console.error('[push]', e);
       }
     })();
+    // En una función sin servidor el trabajo que queda suelto se
+    // corta al responder: hay que avisar que sigue pendiente.
+    (globalThis as any).EdgeRuntime?.waitUntil?.(envio);
   });
 }

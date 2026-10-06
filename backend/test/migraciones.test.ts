@@ -19,7 +19,10 @@ after(async () => { await cerrarDB(); });
 test('al arrancar quedan anotadas las migraciones que corrieron', async () => {
   const filas = await consultar<{ nombre: string }>('SELECT nombre FROM migraciones ORDER BY nombre');
   assert.ok(filas.length > 0, 'tiene que haber al menos una');
-  assert.ok(filas.every((f) => f.nombre.endsWith('.sql')));
+  // Además de las migraciones, la tabla anota las siembras que
+  // corren una sola vez (los productos que se agregaron después).
+  assert.ok(filas.every((f) => f.nombre.endsWith('.sql') || f.nombre.startsWith('siembra-')));
+  assert.ok(filas.some((f) => f.nombre.endsWith('.sql')));
 });
 
 test('no se vuelven a correr en el siguiente arranque', async () => {

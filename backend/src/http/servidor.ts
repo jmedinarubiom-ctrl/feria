@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
+import { timingSafeEqual } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -27,10 +28,14 @@ import { leRegistra } from '../realtime/filtro.ts';
 import {
   pedirCodigo, crearSesion, verificarToken, cerrarSesion, cerrarTodas, sesionesDe,
   codigoParaAlguien, pedirCodigoPorCorreo, crearSesionPorCorreo, crearSesionExterna,
-  ErrorAuth, type Identidad,
+  confirmarCodigo, fijarClaveOperador, normalizarTelefono, ErrorAuth, type Identidad,
 } from '../dominio/auth.ts';
 import { externosDisponibles, verificarTokenExterno } from '../dominio/externo.ts';
 import { proveedorCorreo } from '../correo.ts';
+import {
+  textosLegales, terminosPendientes, aceptarTerminos, datosDelCliente,
+  eliminarCuentaCliente, limpiarDatosViejos,
+} from '../dominio/privacidad.ts';
 import { proveedorSms } from '../sms.ts';
 import { iniciarNotificaciones } from '../realtime/push.ts';
 import {
@@ -47,13 +52,17 @@ import {
 } from '../dominio/cancelacion.ts';
 import {
   crearFeriante, actualizarFeriante, crearRepartidor, actualizarRepartidor,
-  postular, solicitudDe, guardarPerfilCliente,
+  postular, solicitudDe, guardarPerfilCliente, fijarTelefonoDeCliente,
 } from '../dominio/gente.ts';
-import { estadoFeria, horarioActual, FeriaCerrada } from '../dominio/horario.ts';
+import { FeriaCerrada } from '../dominio/horario.ts';
 import {
-  guardarFoto, leerFoto, desdeBase64, MAX_FOTO, ErrorArchivo,
+  listarFerias, vistaDeFeria, feriasConGente, actualizarFeria, dondeAbrirElMapa,
+} from '../dominio/ferias.ts';
+import {
+  guardarFoto, leerFoto, desdeBase64, MAX_FOTO, ErrorArchivo, guardarEnLaBase, leerDeLaBase,
 } from '../dominio/archivos.ts';
 import { leerReferencia, creditos } from '../dominio/referencia.ts';
+import { latir } from '../motor.ts';
 import { deQuien, pasar, limpiar as limpiarFrenos, LIMITE_POR_MINUTO } from './freno.ts';
 
 // ============================================================
@@ -65,7 +74,7 @@ type Ctx = {
   /** Lo que viene en el `?`: el panel filtra por día y por estado. */
   consulta: URLSearchParams;
   cuerpo: any;
-  req: IncomingMessage;
+  req: Peticion;
   crudo: Buffer;
   /** Se resuelve una sola vez por petición aunque se pida dos veces. */
   identidad?: Identidad;
@@ -125,7 +134,13 @@ class RespuestaCruda {
   }
 }
 
-class ErrorHttp extends Error {
+/** Manda al navegador a otra dirección. */
+class Redireccion {
+  destino: string;
+  constructor(destino: string) { this.destino = destino; }
+}
+
+export class ErrorHttp extends Error {
   codigo: number;
   constructor(codigo: number, msg: string) {
     super(msg);
@@ -195,9 +210,9 @@ function fechaValida(valor: unknown): string | undefined {
 const EXPUESTA = process.env.FERIA_EXPUESTA === '1';
 
 /** La petición viene de este computador, no a través del túnel. */
-function esLocal(req: IncomingMessage): boolean {
+function esLocal(req: Peticion): boolean {
   if (req.headers['x-forwarded-for'] || req.headers['x-forwarded-host']) return false;
-  const ip = req.socket.remoteAddress ?? '';
+  const ip = req.socket?.remoteAddress ?? '';
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
 }
 
@@ -273,7 +288,8 @@ function frenarCodigos(ip: string): void {
 POST('/auth/sesion', async (c) => {
   const s = c.cuerpo?.correo
     ? await crearSesionPorCorreo(c.cuerpo.correo, c.cuerpo?.codigo, c.cuerpo?.dispositivo)
-    : await crearSesion(c.cuerpo?.telefono, c.cuerpo?.codigo, c.cuerpo?.dispositivo);
+    : await crearSesion(c.cuerpo?.telefono, c.cuerpo?.codigo, c.cuerpo?.dispositivo,
+        c.cuerpo?.clave, c.cuerpo?.codigoCorreo);
   return {
     token: s.token, rol: s.rol, actorId: s.actorId, nombre: s.nombre, expiraAt: s.expiraAt,
   };
@@ -284,15 +300,66 @@ GET('/auth/yo', async (c) => {
   const tabla = yo.rol === 'feriante' ? 'feriantes'
     : yo.rol === 'repartidor' ? 'repartidores'
     : yo.rol === 'cliente' ? 'clientes' : 'operadores';
-  const perfil = await consultarUno<Fila>(`SELECT * FROM ${tabla} WHERE id = ?`, yo.actorId);
+  const fila = await consultarUno<Fila>(`SELECT * FROM ${tabla} WHERE id = ?`, yo.actorId);
+  // La clave del operador, ni en forma de hash, sale del servidor.
+  const { clave_hash, ...perfil } = fila ?? {};
   return {
     ...yo,
     perfil,
+    ...(yo.rol === 'operador' ? { conClave: !!clave_hash } : {}),
     sesiones: await sesionesDe(yo.actorId),
+    // El operador es quien pone los términos: no se los acepta a sí mismo.
+    terminosPendientes: yo.rol !== 'operador' && await terminosPendientes(yo.actorId),
     // Si pidió ser feriante o repartidor, en qué quedó.
     ...(yo.rol === 'cliente'
-      ? { solicitud: perfil!.telefono ? await solicitudDe(perfil!.telefono) : null } : {}),
+      ? { solicitud: perfil.telefono ? await solicitudDe(perfil.telefono) : null } : {}),
   };
+});
+
+// ============================================================
+// Términos, privacidad y los datos de cada uno
+// ============================================================
+
+/** Los textos, para mostrarlos en la app antes de aceptar. */
+GET('/legal', async () => textosLegales());
+
+/**
+ * La política de privacidad como página. Las tiendas de apps piden
+ * una dirección pública donde leerla.
+ */
+GET('/legal/privacidad', async () => paginaLegal('Política de privacidad', textosLegales().privacidad));
+GET('/legal/terminos', async () => paginaLegal('Términos y condiciones', textosLegales().terminos));
+
+function paginaLegal(titulo: string, texto: string): RespuestaCruda {
+  const seguro = texto.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!));
+  return new RespuestaCruda(`<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feria — ${titulo}</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #FAFBFC; color: #1F2933;
+         max-width: 640px; margin: 0 auto; padding: 24px; line-height: 1.6; }
+  pre { white-space: pre-wrap; font: inherit; }
+</style></head>
+<body><h1>${titulo}</h1><pre>${seguro}</pre></body></html>`, 'text/html; charset=utf-8', 'no-cache');
+}
+
+POST('/auth/aceptar-terminos', async (c) => {
+  const yo = await identidad(c);
+  return aceptarTerminos(yo.actorId, yo.rol, c.cuerpo?.version);
+});
+
+/** Una copia de todo lo que se guarda de quien la pide. */
+GET('/cliente/mis-datos', async (c) => datosDelCliente(await actor(c, 'cliente')));
+
+/** Borra la cuenta y los datos personales. No tiene vuelta. */
+POST('/cliente/eliminar-cuenta', async (c) => {
+  const id = await actor(c, 'cliente');
+  // Un toque sin querer no puede borrar una cuenta.
+  if (c.cuerpo?.confirmo !== 'ELIMINAR') {
+    throw new ErrorHttp(422, 'Falta confirmar.');
+  }
+  return eliminarCuentaCliente(id);
 });
 
 // ============================================================
@@ -301,6 +368,37 @@ GET('/auth/yo', async (c) => {
 
 POST('/cliente/perfil', async (c) =>
   guardarPerfilCliente(await actor(c, 'cliente'), c.cuerpo));
+
+/**
+ * Confirmar un número para la cuenta: se manda un código por SMS a
+ * ese número y con el código queda como el teléfono de la cuenta.
+ *
+ * Es la única forma de poner o cambiar el teléfono confirmado.
+ * Antes el número del perfil era un campo de texto: alguien entraba
+ * con su teléfono y después escribía el de otro encima.
+ */
+POST('/cliente/telefono/codigo', async (c) => {
+  await actor(c, 'cliente');
+  frenarCodigos(deQuien(c.req));
+  return pedirCodigo(c.cuerpo?.telefono, { ocultarCodigo: EXPUESTA && !esLocal(c.req) });
+});
+
+POST('/cliente/telefono/confirmar', async (c) => {
+  const id = await actor(c, 'cliente');
+  const telefono = normalizarTelefono(c.cuerpo?.telefono);
+  await confirmarCodigo(telefono, c.cuerpo?.codigo);
+  return fijarTelefonoDeCliente(id, telefono);
+});
+
+/**
+ * Dónde abrir el mapa para elegir el punto de entrega: cerca de la
+ * dirección que escribió. Con sesión, porque cada consulta sale a
+ * un buscador de direcciones que tiene cupo.
+ */
+GET('/cliente/ubicar', async (c) => {
+  await actor(c, 'cliente');
+  return dondeAbrirElMapa(c.consulta.get('direccion'), c.consulta.get('feria') || FERIA_ID);
+});
 
 /** Sus pedidos, del más nuevo al más viejo. */
 GET('/cliente/pedidos', async (c) => {
@@ -347,14 +445,19 @@ GET('/salud', async () => ({
   ts: new Date().toISOString(),
 }));
 
-/** Si la feria está tomando pedidos ahora mismo. */
-GET('/feria/estado', async () => ({
-  ...estadoFeria(),
-  horario: horarioActual(),
+/**
+ * Si una feria está tomando pedidos ahora mismo. Con `?feria=` la
+ * que eligió el cliente; sin él, la de siempre.
+ */
+GET('/feria/estado', async (c) => ({
+  ...await vistaDeFeria(c.consulta.get('feria') || FERIA_ID),
   // Sacarle el botón de cancelar al cliente sin darle a dónde
   // llamar lo deja atrapado. El teléfono es la salida.
   contacto: CONFIG.telefonoContacto,
 }));
+
+/** Todas las ferias: las que ya reparten y las que vienen. */
+GET('/ferias', async () => ({ ferias: await listarFerias() }));
 
 GET('/catalogo', async () => {
   const rubros = await consultar<Fila>('SELECT * FROM rubros ORDER BY nombre');
@@ -391,23 +494,31 @@ POST('/pedidos', async (c) => {
   const email = typeof b.clienteEmail === 'string' ? b.clienteEmail : null;
 
   const r = await crearPedido({
-    feriaId: FERIA_ID,
+    // La feria que eligió en la app. Que exista y esté repartiendo
+    // lo comprueba el dominio.
+    feriaId: typeof b.feriaId === 'string' && b.feriaId ? b.feriaId : FERIA_ID,
     clienteId,
     clienteNombre: b.clienteNombre,
-    // Puede dejar otro número de contacto —pide para la mamá—; si
-    // no, el de su cuenta, que está confirmado.
-    clienteTelefono: typeof b.clienteTelefono === 'string' && b.clienteTelefono.trim()
-      ? b.clienteTelefono : cliente!.telefono,
+    // Con número confirmado, el pedido lleva ESE: es el único que
+    // se sabe de quién es. Solo quien entró sin teléfono (correo,
+    // Google) escribe uno de contacto.
+    clienteTelefono: cliente!.telefono
+      ?? (typeof b.clienteTelefono === 'string' && b.clienteTelefono.trim()
+        ? b.clienteTelefono : cliente!.telefono_contacto),
     clienteEmail: email,
     direccion: b.direccion,
     lat: Number(b.lat),
     lng: Number(b.lng),
+    puntoMarcado: b.puntoMarcado === true,
+    precisionM: Number(b.precisionM),
     notas: typeof b.notas === 'string' ? b.notas : null,
     items: b.items,
   });
+  await ejecutar('UPDATE clientes SET ultima_actividad_at = now() WHERE id = ?', clienteId);
   // Lo que usó queda guardado para la próxima compra.
   await guardarPerfilCliente(clienteId, {
     nombre: b.clienteNombre, email: email ?? cliente!.email, direccion: b.direccion,
+    telefonoContacto: b.clienteTelefono,
   });
   return r;
 });
@@ -505,7 +616,15 @@ GET('/webhooks/mercadopago', async () => ({ ok: true }));
  * La pasarela trae de vuelta al navegador, no a la app, así que
  * esta página lo devuelve a la app por deep link.
  */
-GET('/pagos/retorno', async () => new RespuestaCruda(PAGINA_RETORNO, 'text/html; charset=utf-8', 'no-store'));
+GET('/pagos/retorno', async () => (SIN_HTML
+  ? new Redireccion('feria://pago')
+  : new RespuestaCruda(PAGINA_RETORNO, 'text/html; charset=utf-8', 'no-store')));
+
+/**
+ * Las funciones de Supabase entregan el HTML como texto plano: ahí
+ * la vuelta del pago es una redirección directa a la app.
+ */
+const SIN_HTML = process.env.FERIA_SIN_HTML === '1';
 
 // Antes esto devolvía JSON: después de pagar, el cliente quedaba
 // mirando `{"ok":true,"volverA":"feria://pago"}` en el navegador sin
@@ -669,6 +788,13 @@ GET('/operador/tablero', async (c) => {
  * WhatsApp. Evita pagar un SMS por cada ingreso de diez personas
  * que se ven todas las semanas.
  */
+/** El operador pone o cambia su clave (su segundo factor). */
+POST('/operador/clave', async (c) => {
+  const yo = await identidad(c);
+  if (yo.rol !== 'operador') throw new ErrorHttp(403, 'Esta acción es solo para la operación.');
+  return fijarClaveOperador(yo.actorId, c.cuerpo?.nueva, c.cuerpo?.actual, yo.sesionId);
+});
+
 POST('/operador/codigo-para/:actorId', async (c) => {
   const operadorId = await actor(c, 'operador');
   return codigoParaAlguien(c.params.actorId, operadorId);
@@ -677,7 +803,8 @@ POST('/operador/codigo-para/:actorId', async (c) => {
 GET('/operador/gente', async (c) => {
   await actor(c, 'operador');
   const feriantes = await consultar(
-    `SELECT f.id, f.nombre, f.puesto, f.telefono, f.conectado, f.activo, f.pendiente,
+    `SELECT f.id, f.nombre, f.puesto, f.telefono, f.conectado, f.activo, f.pendiente, f.feria_id,
+            (SELECT fe.nombre FROM ferias fe WHERE fe.id = f.feria_id) AS feria,
             COALESCE(string_agg(r.nombre, ', ' ORDER BY r.nombre), '—') AS rubros,
             COALESCE(array_agg(r.id ORDER BY r.nombre) FILTER (WHERE r.id IS NOT NULL), '{}')
               AS rubro_ids,
@@ -694,13 +821,24 @@ GET('/operador/gente', async (c) => {
               WHERE v.repartidor_id = repartidores.id AND v.estado = 'EN_RUTA') AS en_curso
        FROM repartidores ORDER BY pendiente DESC, activo DESC, conectado DESC, nombre`);
   const rubros = await consultar('SELECT id, nombre FROM rubros ORDER BY nombre');
-  return { feriantes, repartidores, rubros };
+  return { feriantes, repartidores, rubros, ferias: await feriasConGente() };
+});
+
+/** Las ferias, con su horario y si ya se reparte desde cada una. */
+GET('/operador/ferias', async (c) => {
+  await actor(c, 'operador');
+  return { ferias: await feriasConGente() };
+});
+POST('/operador/ferias/:id', async (c) => {
+  await actor(c, 'operador');
+  return actualizarFeria(c.params.id, c.cuerpo);
 });
 
 /** Alta y cambios de la gente: los feriantes y repartidores de verdad. */
 POST('/operador/feriantes', async (c) => {
   await actor(c, 'operador');
-  return crearFeriante(c.cuerpo, FERIA_ID);
+  return crearFeriante(c.cuerpo,
+    typeof c.cuerpo.feriaId === 'string' && c.cuerpo.feriaId ? c.cuerpo.feriaId : FERIA_ID);
 });
 POST('/operador/feriantes/:id', async (c) => {
   await actor(c, 'operador');
@@ -780,7 +918,9 @@ POST('/operador/productos', async (c) => {
  */
 POST('/operador/fotos', async (c) => {
   await actor(c, 'operador');
-  return guardarFoto(desdeBase64(c.cuerpo?.datos));
+  const f = guardarFoto(desdeBase64(c.cuerpo?.datos));
+  await guardarEnLaBase(`foto/${f.nombre}`, f.mime, f.datos);
+  return { camino: f.camino, bytes: f.bytes, mime: f.mime };
 }, Math.ceil(MAX_FOTO * 4 / 3) + 64 * 1024);
 
 /**
@@ -822,7 +962,9 @@ GET('/admin/:archivo', async (c) => servirPanel(c.params.archivo));
  * símbolo, que es lo que ya hacía antes.
  */
 GET('/referencia/:productoId', async (c) => {
-  const foto = leerReferencia(c.params.productoId);
+  const id = c.params.productoId;
+  const foto = leerReferencia(id)
+    ?? (/^[a-z0-9-]{1,60}$/.test(id) ? await leerDeLaBase(`ref/${id}`) : null);
   if (!foto) throw new ErrorHttp(404, 'Sin foto de referencia.');
   return new RespuestaCruda(foto.datos, foto.mime, 'public, max-age=86400');
 });
@@ -835,7 +977,9 @@ GET('/referencia', async () => ({ creditos }));
  * mirando el catálogo, igual que el precio.
  */
 GET('/fotos/:nombre', async (c) => {
-  const foto = leerFoto(c.params.nombre);
+  const nombre = c.params.nombre;
+  const foto = leerFoto(nombre)
+    ?? (/^[0-9a-f]{32}\.(jpg|png|webp)$/.test(nombre) ? await leerDeLaBase(`foto/${nombre}`) : null);
   if (!foto) throw new ErrorHttp(404, 'Foto no encontrada.');
   // El nombre es el hash del contenido, así que nunca cambia: se
   // puede guardar para siempre.
@@ -875,6 +1019,51 @@ POST('/operador/reembolsos/:pagoId/hecho', async (c) => {
 GET('/operador/eventos/:entidadId', async (c) => {
   await actor(c, 'operador');
   return consultar('SELECT * FROM eventos WHERE entidad_id = ? ORDER BY id', c.params.entidadId);
+});
+
+// ============================================================
+// Latido desde afuera
+// ============================================================
+
+/**
+ * Hace latir el motor por un rato.
+ *
+ * Una función sin servidor no tiene un proceso que viva siempre: el
+ * reloj lo pone la base (pg_cron), que llama acá cada minuto, y la
+ * función late por 58 segundos. Solo con el secreto: si no, sería
+ * una forma de gastar la cuota de la función desde afuera.
+ */
+POST('/interno/latir', async (c) => {
+  const secreto = process.env.FERIA_MOTOR_SECRETO ?? '';
+  const dado = String(c.req.headers['x-feria-motor'] ?? '');
+  if (secreto.length < 16 || dado.length !== secreto.length
+      || !timingSafeEqual(Buffer.from(dado), Buffer.from(secreto))) {
+    throw new ErrorHttp(404, 'Ruta no encontrada.');
+  }
+  if (c.cuerpo?.eco) {
+    // Para revisar con qué dirección ve la función a quien llama.
+    const h = c.req.headers;
+    return { eco: { xff: h['x-forwarded-for'], cf: h['cf-connecting-ip'], real: h['x-real-ip'], quien: deQuien(c.req) } };
+  }
+  const hasta = Date.now() + Math.min(Number(c.cuerpo?.segundos ?? 58), 120) * 1000;
+  // Sin un proceso que viva siempre, la limpieza de datos viejos
+  // también cuelga de este reloj: cuatro veces al día.
+  const ahora = new Date();
+  const limpieza = ahora.getUTCMinutes() === 0 && ahora.getUTCHours() % 6 === 0
+    ? limpiarDatosViejos()
+      .then((r) => {
+        const algo = Object.entries(r).filter(([, n]) => n > 0);
+        if (algo.length) console.log('[retención] borrado:', Object.fromEntries(algo));
+      })
+      .catch((e) => console.error('[retención]', e))
+    : Promise.resolve();
+  const trabajo = Promise.all([latir(() => Date.now() < hasta), limpieza]).then(() => undefined);
+  // Si el entorno deja seguir trabajando después de responder, se
+  // responde al tiro; si no, la respuesta espera al último latido.
+  const fondo = (globalThis as any).EdgeRuntime?.waitUntil;
+  if (typeof fondo === 'function') fondo.call((globalThis as any).EdgeRuntime, trabajo);
+  else if (c.cuerpo?.esperar) await trabajo;
+  return { ok: true, latiendo: true };
 });
 
 // ============================================================
@@ -922,26 +1111,60 @@ function leerCuerpo(req: IncomingMessage, max = MAX_CUERPO): Promise<Buffer> {
   });
 }
 
-async function manejar(req: IncomingMessage, res: ServerResponse) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers',
-    'content-type, authorization');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+/**
+ * Lo que el servidor necesita saber de una petición. Lo cumple el
+ * `IncomingMessage` de Node y también lo que arma la función de
+ * Supabase (`edge.ts`), que no tiene sockets.
+ */
+export type Peticion = {
+  method?: string;
+  url?: string;
+  headers: Record<string, string | string[] | undefined>;
+  socket?: { remoteAddress?: string };
+};
+
+export type Respuesta = {
+  estado: number;
+  cabeceras: Record<string, string>;
+  cuerpo: Buffer | string | null;
+};
+
+const CABECERAS_FIJAS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'content-type, authorization',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   // Que el navegador no adivine tipos: lo que se sube como foto se
   // sirve como foto. Y que nadie meta el panel dentro de otra página.
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Referrer-Policy', 'no-referrer');
-  if (req.method === 'OPTIONS') return res.writeHead(204).end();
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'no-referrer',
+};
+
+const enJson = (estado: number, datos: unknown, extra: Record<string, string> = {}): Respuesta => ({
+  estado,
+  cabeceras: { ...CABECERAS_FIJAS, 'content-type': 'application/json', ...extra },
+  cuerpo: JSON.stringify(datos),
+});
+
+/**
+ * Atiende una petición y devuelve la respuesta entera.
+ *
+ * No sabe de sockets ni de `ServerResponse`: así el mismo código
+ * corre en el servidor de Node y en una función sin servidor.
+ * `leer` entrega el cuerpo, con el tope que la ruta permita.
+ */
+export async function atender(
+  req: Peticion, leer: (max: number) => Promise<Buffer>,
+): Promise<Respuesta> {
+  if (req.method === 'OPTIONS') return { estado: 204, cabeceras: CABECERAS_FIJAS, cuerpo: null };
 
   // El freno va antes de resolver la ruta: una avalancha contra una
   // ruta inexistente cuesta lo mismo que contra una real.
   const espera = pasar(deQuien(req));
   if (espera > 0) {
-    res.writeHead(429, { 'content-type': 'application/json', 'retry-after': String(espera) });
-    return res.end(JSON.stringify({
+    return enJson(429, {
       error: `Demasiadas peticiones. Prueba de nuevo en ${espera} segundos.`,
-    }));
+    }, { 'retry-after': String(espera) });
   }
 
   let camino = req.url ?? '/';
@@ -963,7 +1186,7 @@ async function manejar(req: IncomingMessage, res: ServerResponse) {
     if (!encontrada) throw new ErrorHttp(404, 'Ruta no encontrada.');
 
     const crudo = req.method === 'POST'
-      ? await leerCuerpo(req, encontrada.maxCuerpo) : Buffer.alloc(0);
+      ? await leer(encontrada.maxCuerpo ?? MAX_CUERPO) : Buffer.alloc(0);
     const cuerpo = !crudo.length ? {} : JSON.parse(crudo.toString('utf8'));
     // `null`, un número o una lista son JSON válido pero no son un
     // cuerpo: los handlers leen `c.cuerpo.algo` sin preguntar.
@@ -973,15 +1196,21 @@ async function manejar(req: IncomingMessage, res: ServerResponse) {
     const salida = await encontrada.handler({
       params: encontrada.params, consulta: url.searchParams, cuerpo, req, crudo,
     });
-    if (salida instanceof RespuestaCruda) {
-      res.writeHead(200, {
-        'content-type': salida.tipo,
-        ...(salida.cache ? { 'cache-control': salida.cache } : {}),
-      });
-      return res.end(salida.datos);
+    if (salida instanceof Redireccion) {
+      return { estado: 302, cabeceras: { ...CABECERAS_FIJAS, location: salida.destino }, cuerpo: null };
     }
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(salida ?? { ok: true }));
+    if (salida instanceof RespuestaCruda) {
+      return {
+        estado: 200,
+        cabeceras: {
+          ...CABECERAS_FIJAS,
+          'content-type': salida.tipo,
+          ...(salida.cache ? { 'cache-control': salida.cache } : {}),
+        },
+        cuerpo: salida.datos,
+      };
+    }
+    return enJson(200, salida ?? { ok: true });
   } catch (e: any) {
     const codigo =
       e instanceof ErrorHttp ? e.codigo
@@ -998,18 +1227,38 @@ async function manejar(req: IncomingMessage, res: ServerResponse) {
       : e instanceof SyntaxError ? 400
       : 500;
     if (codigo === 500) console.error('[error]', camino, e);
-    if (res.headersSent) return;
-    res.writeHead(codigo, { 'content-type': 'application/json' });
     // El detalle de un error interno queda en el registro, no viaja
     // al cliente: puede traer nombres de tablas o de columnas.
-    res.end(JSON.stringify({
+    return enJson(codigo, {
       error: codigo === 500 ? 'Error interno. Intenta de nuevo.' : (e.message ?? 'Error.'),
-    }));
+      // Para que la app muestre el campo de la clave del operador.
+      ...(e.pideClave ? { pideClave: true } : {}),
+      // Y el del código que se mandó al correo, como segunda prueba.
+      ...(e.pideCorreo ? {
+        pideCorreo: true, correo: e.correo,
+        ...(e.codigoDev && !(EXPUESTA && !esLocal(req)) ? { codigoDev: e.codigoDev } : {}),
+      } : {}),
+    });
   }
 }
 
-/** Una pausa que no mantiene vivo el proceso por sí sola. */
-const dormir = (ms: number) => new Promise<void>((r) => { setTimeout(r, ms).unref(); });
+async function manejar(req: IncomingMessage, res: ServerResponse) {
+  const r = await atender(req, (max) => leerCuerpo(req, max));
+  if (res.headersSent) return;
+  res.writeHead(r.estado, r.cabeceras);
+  res.end(r.cuerpo ?? undefined);
+}
+
+/**
+ * Deja el servidor listo para `atender` sin abrir un puerto: es lo
+ * que usa la función de Supabase. No migra ni siembra —eso lo hace
+ * el arranque normal, `npm start`— para que despertar la función no
+ * cueste una docena de consultas.
+ */
+export async function preparar(url?: string): Promise<void> {
+  await abrirDB({ url, sinMigrar: true });
+  iniciarNotificaciones();
+}
 
 export async function iniciar(puerto = CONFIG.puerto, opciones: { memoria?: boolean } = {}) {
   await abrirDB(opciones);
@@ -1052,11 +1301,28 @@ export async function iniciar(puerto = CONFIG.puerto, opciones: { memoria?: bool
       clientes.set(ws, { rol, id: url.searchParams.get('id') ?? '' });
       return;
     }
-    verificarToken(url.searchParams.get('token') ?? undefined)
+    const entrar = (token: string | undefined) => verificarToken(token)
       .then((yo) => {
         if (ws.readyState === ws.OPEN) clientes.set(ws, { rol: yo.rol, id: yo.actorId });
       })
       .catch(() => ws.close(1008, 'sesión inválida'));
+
+    // El token llega en el primer mensaje, no en la dirección: las
+    // direcciones quedan escritas en los registros del hosting y de
+    // cualquier proxy del camino, y con el token se entra como esa
+    // persona. Las apps anteriores todavía lo mandan en la
+    // dirección; se les sigue aceptando.
+    const enDireccion = url.searchParams.get('token');
+    if (enDireccion) return void entrar(enDireccion);
+
+    const plazo = setTimeout(() => ws.close(1008, 'sin identificarse'), 10_000);
+    ws.once('message', (dato) => {
+      clearTimeout(plazo);
+      let token: unknown;
+      try { token = JSON.parse(String(dato))?.token; } catch { /* no era JSON */ }
+      void entrar(typeof token === 'string' ? token : undefined);
+    });
+    ws.on('close', () => clearTimeout(plazo));
   });
 
   bus.on('mensaje', (m) => {
@@ -1066,50 +1332,30 @@ export async function iniciar(puerto = CONFIG.puerto, opciones: { memoria?: bool
     }
   });
 
-  // Latido del motor. Se encadena en vez de usar setInterval para
-  // que dos ticks no se solapen si uno tarda más de un segundo.
+  // Latido del motor y revisión de cobros: ver `motor.ts`.
   let vivo = true;
-  const latir = async () => {
-    while (vivo) {
-      try {
-        await tick();
-      } catch (e) {
-        console.error('[tick]', e);
-      }
-      await dormir(CONFIG.intervaloTickMs);
-    }
-  };
-  void latir();
-
-  /**
-   * Revisa los cobros abiertos contra la pasarela.
-   *
-   * Aparte del latido del motor porque es una llamada a un servicio
-   * externo y va mucho más espaciada. El webhook sigue siendo el
-   * camino rápido; esto es la red que lo atrapa cuando se pierde —
-   * y en desarrollo, donde el webhook no llega nunca a `localhost`,
-   * es el único camino.
-   */
-  const revisarPagos = async () => {
-    while (vivo) {
-      await dormir(8000);
-      if (!vivo) break;
-      try {
-        const r = await revisarCobrosAbiertos();
-        if (r.confirmados > 0) {
-          console.log(`[pagos] ${r.confirmados} cobro(s) confirmados al revisar`);
-        }
-      } catch (e) {
-        console.error('[pagos] revisión', e);
-      }
-    }
-  };
-  void revisarPagos();
+  if (process.env.FERIA_SIN_MOTOR !== '1') void latir(() => vivo);
+  else console.log('[motor] FERIA_SIN_MOTOR: este servidor no hace latir el despacho.');
 
   // Las ventanas del freno vencen solas, pero alguien tiene que
   // sacarlas del mapa o crece con cada IP que pasó alguna vez.
   const barrido = setInterval(() => limpiarFrenos(), 60_000);
   barrido.unref();
+
+  // Lo que ya no hace falta guardar se borra solo.
+  const limpiar = () => limpiarDatosViejos()
+    .then((r) => {
+      const algo = Object.entries(r).filter(([, n]) => n > 0);
+      if (algo.length) console.log('[retención] borrado:', Object.fromEntries(algo));
+    })
+    .catch((e) => console.error('[retención]', e));
+  void limpiar();
+  setInterval(limpiar, 6 * 3_600_000).unref();
+
+  if (process.env.NODE_ENV === 'production' && textosLegales().borrador) {
+    console.warn('[legal] Los términos y la política de privacidad son el BORRADOR técnico.\n'
+      + '        Reemplaza backend/src/legal/*.md por el texto del abogado y cambia LEGAL_VERSION.');
+  }
 
   // Cerrar el servidor detiene también los dos relojes.
   servidor.on('close', () => { vivo = false; wss.close(); });

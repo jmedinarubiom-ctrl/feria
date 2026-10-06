@@ -1,5 +1,5 @@
 import React from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 
 import { C, E, R, T } from '../tema';
@@ -9,28 +9,42 @@ import { Manzana } from '../Logotipo';
 import { llamar, useRellenoPestanas } from './piezas';
 import { textoHorario, textoUltimoPedido } from './horario';
 import { simboloRubro } from '../simbolos';
+import { useCliente } from './estado';
 
 /**
  * La feria.
  *
- * En el mockup esta pestaña es un mapa para elegir entre varios
- * puestos. Acá hay una sola feria y el cliente no elige puesto —el
- * pedido se ofrece a todos los del rubro y lo toma el primero que
- * puede—, así que la pestaña explica eso y muestra dónde queda.
+ * El cliente elige de qué feria le traen —la que le queda cerca—,
+ * pero no elige puesto: el pedido se ofrece a todos los del rubro
+ * en esa feria y lo toma el primero que puede. Las ferias que
+ * todavía no reparten aparecen como «próximamente».
  */
-const LUGAR = {
-  nombre: 'Feria Av. Argentina',
-  direccion: 'Av. Argentina, Valparaíso',
-  consulta: 'Feria Av. Argentina, Valparaíso',
-};
-
 export default function Feria({ navegar }: { navegar: (p: string, args?: any) => void }) {
-  const { datos: feria, error, recargar } = useRecurso<any>('/feria/estado');
+  const { feriaId, elegirFeria, unidades } = useCliente();
+  const { datos: feria, error, recargar } =
+    useRecurso<any>(`/feria/estado?feria=${encodeURIComponent(feriaId)}`);
+  const { datos: todas } = useRecurso<{ ferias: any[] }>('/ferias');
+
+  // Cambiar de feria vacía el carro: mejor preguntar que perderlo
+  // por un toque.
+  const cambiarA = (f: any) => {
+    if (f.id === feriaId) return;
+    if (unidades === 0) return elegirFeria(f.id);
+    Alert.alert('Cambiar de feria', `Tu carrito se vacía si cambias a ${f.nombre}.`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Cambiar', onPress: () => elegirFeria(f.id) },
+    ]);
+  };
   const { datos: catalogo } = useRecurso<any[]>('/catalogo');
   const relleno = useRellenoPestanas();
 
   if (error) return <NoCargo error={error} onReintentar={recargar} />;
   if (!feria || !catalogo) return <Cargando />;
+
+  // Un servidor que todavía no manda el nombre o la calle no puede
+  // dejar el botón del mapa buscando «undefined».
+  const lugar = [feria.nombre ?? 'Feria libre', feria.calle, feria.comuna ?? 'Valparaíso']
+    .filter(Boolean).join(', ');
 
   const abierta = feria.aceptandoPedidos;
 
@@ -49,11 +63,13 @@ export default function Feria({ navegar }: { navegar: (p: string, args?: any) =>
           <Manzana tamano={190} />
         </View>
         <View style={e.lugar}>
-          <Text style={[T.encabezado, { color: '#FFFFFF' }]}>{LUGAR.nombre}</Text>
-          <Text style={[T.apoyo, { color: 'rgba(255,255,255,0.85)' }]}>{LUGAR.direccion}</Text>
+          <Text style={[T.encabezado, { color: '#FFFFFF' }]}>{feria.nombre ?? 'Tu feria'}</Text>
+          <Text style={[T.apoyo, { color: 'rgba(255,255,255,0.85)' }]}>
+            {[feria.calle, feria.comuna].filter(Boolean).join(', ')}
+          </Text>
           <Pressable
             onPress={() => Linking.openURL(
-              `https://maps.apple.com/?q=${encodeURIComponent(LUGAR.consulta)}`)}
+              `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(lugar)}`)}
             style={({ pressed }) => [e.verMapa, pressed && { opacity: 0.8 }]}
           >
             <Text style={[T.micro, { color: C.verdeOscuro, fontFamily: T.destacado.fontFamily }]}>
@@ -84,6 +100,38 @@ export default function Feria({ navegar }: { navegar: (p: string, args?: any) =>
         <Text style={T.cuerpo}>{textoHorario(feria.horario)}</Text>
         <Text style={[T.micro, { marginTop: 2 }]}>{textoUltimoPedido(feria.horario)}</Text>
       </View>
+
+      {todas && todas.ferias.length > 1 ? (
+        <View style={e.bloque}>
+          <Text style={[T.destacado, { marginBottom: E.s }]}>Elige tu feria</Text>
+          {todas.ferias.map((f) => {
+            const elegida = f.id === feriaId;
+            return (
+              <Pressable
+                key={f.id}
+                disabled={!f.activa}
+                onPress={() => cambiarA(f)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: elegida, disabled: !f.activa }}
+                style={({ pressed }) => [
+                  e.opcionFeria,
+                  elegida && { borderColor: C.verde, backgroundColor: C.verdeSuave },
+                  !f.activa && { opacity: 0.55 },
+                  pressed && { opacity: 0.8 },
+                ]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={T.destacado}>{f.nombre}</Text>
+                  <Text style={T.micro}>{f.comuna} · {textoHorario(f.horario)}</Text>
+                </View>
+                <Text style={[T.micro, { color: elegida ? C.verdeOscuro : C.textoSuave }]}>
+                  {elegida ? 'Tu feria ✓' : f.activa ? 'Elegir' : 'Próximamente'}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
 
       <View style={e.bloque}>
         <Text style={[T.destacado, { marginBottom: E.m }]}>Cómo funciona</Text>
@@ -140,6 +188,11 @@ export default function Feria({ navegar }: { navegar: (p: string, args?: any) =>
 }
 
 const e = StyleSheet.create({
+  opcionFeria: {
+    flexDirection: 'row', alignItems: 'center', gap: E.m,
+    padding: E.m, marginTop: E.s, borderRadius: R.medio,
+    borderWidth: 1, borderColor: C.borde,
+  },
   pantalla: { flex: 1, backgroundColor: C.fondo },
   relleno: { padding: E.l, gap: E.l },
 

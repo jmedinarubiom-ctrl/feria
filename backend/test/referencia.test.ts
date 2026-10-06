@@ -16,6 +16,12 @@ const DEL_CATALOGO = [
   'p-tomate', 'p-papa', 'p-cebolla', 'p-lechuga', 'p-zanahoria', 'p-zapallo',
   'p-palta', 'p-platano', 'p-manzana', 'p-naranja', 'p-frutilla',
   'p-merluza', 'p-reineta', 'p-choritos', 'p-huevos', 'p-aceitunas',
+  // Los que se sumaron en octubre de 2026.
+  'p-choclo', 'p-pimenton', 'p-ajo', 'p-cilantro', 'p-perejil', 'p-apio', 'p-betarraga',
+  'p-repollo', 'p-brocoli', 'p-acelga', 'p-zapallo-italiano', 'p-pepino', 'p-poroto-verde',
+  'p-limon', 'p-pera', 'p-uva', 'p-kiwi', 'p-mandarina', 'p-salmon', 'p-jurel',
+  'p-queso-fresco', 'p-queso-mantecoso', 'p-queso-cabra', 'p-quesillo',
+  'p-porotos', 'p-lentejas', 'p-nueces', 'p-miel', 'p-mote',
 ];
 
 test('cada producto del catálogo tiene su foto', () => {
@@ -51,5 +57,19 @@ test('un id inventado no devuelve nada ni rompe', () => {
   for (const intento of ['../../etc/passwd', 'p-tomate/../../x', 'no-existe', '']) {
     assert.equal(leerReferencia(intento), null, intento);
     assert.equal(hayReferencia(intento), false, intento);
+  }
+});
+
+test('todo producto de la semilla tiene foto: ninguno se queda con el dibujo', async () => {
+  const { abrirDB, cerrarDB, consultar } = await import('../src/db/index.ts');
+  const { sembrar } = await import('../src/db/semilla.ts');
+  await abrirDB({ memoria: true });
+  try {
+    await sembrar();
+    const productos = await consultar<{ id: string }>('SELECT id FROM productos');
+    assert.ok(productos.length >= 45);
+    assert.deepEqual(productos.map((p) => p.id).filter((id) => !hayReferencia(id)), []);
+  } finally {
+    await cerrarDB();
   }
 });

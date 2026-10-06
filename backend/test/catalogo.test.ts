@@ -90,29 +90,29 @@ test('un producto apagado no se puede pedir pero sigue en el catálogo', async (
 test('se pueden agregar productos nuevos', async () => {
   const nuevo = await crearProducto({
     rubroId: 'verduras',
-    nombre: 'Choclo',
+    nombre: 'Alcachofa',
     formato: 'Docena',
     precioVenta: 4500,
     precioCosto: 3000,
   });
 
-  assert.equal(nuevo.id, 'p-choclo', 'id legible a partir del nombre');
+  assert.equal(nuevo.id, 'p-alcachofa', 'id legible a partir del nombre');
   assert.equal(nuevo.margen, 1500);
   assert.equal(nuevo.activo, true);
 
   // Y se puede pedir de inmediato.
-  const { pedidoId } = await pedir([{ productoId: 'p-choclo', cantidad: 2 }]);
+  const { pedidoId } = await pedir([{ productoId: 'p-alcachofa', cantidad: 2 }]);
   const p = await consultarUno<Fila>('SELECT total_productos FROM pedidos WHERE id = ?', pedidoId);
   assert.equal(p!.total_productos, 9000);
 });
 
 test('no deja crear dos productos con el mismo nombre', async () => {
   await crearProducto({
-    rubroId: 'verduras', nombre: 'Choclo', formato: 'Docena',
+    rubroId: 'verduras', nombre: 'Alcachofa', formato: 'Docena',
     precioVenta: 4500, precioCosto: 3000,
   });
   await assert.rejects(() => crearProducto({
-    rubroId: 'verduras', nombre: 'Choclo', formato: 'Media docena',
+    rubroId: 'verduras', nombre: 'Alcachofa', formato: 'Media docena',
     precioVenta: 2500, precioCosto: 1800,
   }), (e: ErrorCatalogo) => e.codigo === 409);
 });
@@ -147,7 +147,7 @@ test('cambiar solo el nombre no toca los precios', async () => {
 
 test('la foto se guarda al crear y al editar', async () => {
   const r = await crearProducto({
-    rubroId: 'verduras', nombre: 'Choclo', formato: 'Docena',
+    rubroId: 'verduras', nombre: 'Alcachofa', formato: 'Docena',
     precioVenta: 3000, precioCosto: 2000,
     imagenUrl: 'https://fotos.feria.cl/choclo.jpg',
   });
@@ -212,4 +212,42 @@ test('un camino que parece de acá pero no lo es se rechaza', async () => {
   await assert.rejects(
     () => actualizarProducto('p-tomate', { imagenUrl: '/fotos/../../etc/passwd' }),
     (e: ErrorCatalogo) => e.codigo === 422);
+});
+
+test('el catálogo trae quesos y lo más pedido de una feria', async () => {
+  const rubros = await catalogoCompleto();
+  const quesos = rubros.find((r: Fila) => r.id === 'quesos')!;
+  assert.ok(quesos, 'existe el rubro de quesos');
+  assert.ok(quesos.productos.length >= 3);
+  const ids = rubros.flatMap((r: Fila) => r.productos.map((p: Fila) => p.id));
+  for (const id of ['p-queso-fresco', 'p-limon', 'p-choclo', 'p-ajo', 'p-cilantro', 'p-lentejas']) {
+    assert.ok(ids.includes(id), `falta ${id}`);
+  }
+  // Ninguno se vende bajo el costo.
+  const todos = rubros.flatMap((r: Fila) => r.productos);
+  assert.ok(todos.every((p: Fila) => p.precio_venta > p.precio_costo));
+});
+
+test('a un catálogo que ya existía se le agregan los productos nuevos una sola vez', async () => {
+  const { ejecutar } = await import('../src/db/index.ts');
+  const { sembrar } = await import('../src/db/semilla.ts');
+  // Una base de antes: sin los quesos, sin la marca, y con un precio
+  // que el operador ya había cambiado.
+  await ejecutar(`DELETE FROM feriante_rubros WHERE rubro_id = 'quesos'`);
+  await ejecutar(`DELETE FROM productos WHERE rubro_id = 'quesos' OR id = 'p-limon'`);
+  await ejecutar(`DELETE FROM rubros WHERE id = 'quesos'`);
+  await ejecutar(`DELETE FROM migraciones WHERE nombre LIKE 'siembra-%'`);
+  await ejecutar(`UPDATE productos SET precio_venta = 9999 WHERE id = 'p-tomate'`);
+
+  await sembrar();
+
+  const p = async (id: string) => consultarUno<Fila>('SELECT * FROM productos WHERE id = ?', id);
+  assert.ok(await p('p-queso-fresco'), 'aparecen los nuevos');
+  assert.ok(await p('p-limon'));
+  assert.equal((await p('p-tomate'))!.precio_venta, 9999, 'sin tocar lo que ya estaba');
+
+  // El operador saca uno; al reiniciar el servidor no vuelve solo.
+  await ejecutar(`DELETE FROM productos WHERE id = 'p-quesillo'`);
+  await sembrar();
+  assert.equal(await p('p-quesillo'), undefined);
 });

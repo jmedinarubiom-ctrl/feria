@@ -16,3 +16,7 @@ dist/
 
 # Registros de ./feria.sh
 .registro/
+
+# Copia de backend/src que se sube a Supabase
+supabase/functions/api/src/
+supabase/.temp/

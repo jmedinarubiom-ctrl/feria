@@ -43,6 +43,12 @@ export default function Entrar({ onEntro }: { onEntro: (s: SesionGuardada) => vo
   const [paso, setPaso] = useState<'telefono' | 'codigo'>('telefono');
   const [medio, setMedio] = useState<'telefono' | 'correo'>('telefono');
   const [correo, setCorreo] = useState('');
+  // Solo para el operador: el servidor la pide después del código.
+  const [pideClave, setPideClave] = useState(false);
+  const [clave, setClave] = useState('');
+  // Vuelve después de meses: se pide además un código a su correo.
+  const [pideCorreo, setPideCorreo] = useState<{ correo: string; codigoDev?: string } | null>(null);
+  const [codigoCorreo, setCodigoCorreo] = useState('');
   const [cambiandoServidor, setCambiandoServidor] = useState(false);
   const [otroServidor, setOtroServidor] = useState('');
 
@@ -94,9 +100,30 @@ export default function Entrar({ onEntro }: { onEntro: (s: SesionGuardada) => vo
     setError(null);
     try {
       const dispositivo = `${Platform.OS} · ${Platform.Version}`;
-      const s = await canjearCodigo(destino, codigo, dispositivo);
+      const s = await canjearCodigo(destino, codigo, dispositivo, {
+        clave: clave || undefined, codigoCorreo: codigoCorreo || undefined,
+      });
       await entrarCon(s, medio === 'telefono' ? telefono : undefined);
     } catch (e: any) {
+      // Falta la clave del operador: el código sigue sirviendo, así
+      // que no se borra; solo aparece el campo que faltaba.
+      if (e instanceof ErrorApi && e.pideCorreo) {
+        // El código del SMS estaba bien y sigue sirviendo: falta el
+        // que se mandó al correo.
+        setError(pideCorreo && codigoCorreo ? e.message : null);
+        setPideCorreo((previo) => ({
+          correo: e.pideCorreo!.correo,
+          codigoDev: e.pideCorreo!.codigoDev ?? previo?.codigoDev,
+        }));
+        setCodigoCorreo('');
+        return;
+      }
+      if (e instanceof ErrorApi && e.pideClave) {
+        setPideClave(true);
+        setError(clave ? e.message : null);
+        setClave('');
+        return;
+      }
       setError(e instanceof ErrorApi ? e.message : 'No se pudo entrar.');
       setCodigo('');
     } finally {
@@ -113,7 +140,7 @@ export default function Entrar({ onEntro }: { onEntro: (s: SesionGuardada) => vo
         <View style={{ marginBottom: 44, alignItems: 'center' }}>
           <Logotipo tamano={210} />
           <Text style={[T.apoyo, { marginTop: 8 }]}>
-            Feria Av. Argentina · Valparaíso
+            Tu feria libre, a domicilio
           </Text>
         </View>
 
@@ -173,6 +200,7 @@ export default function Entrar({ onEntro }: { onEntro: (s: SesionGuardada) => vo
                 : !/^\S+@\S+\.\S{2,}$/.test(correo.trim()))}
             />
             <IngresoExterno
+              direccion={servidor()}
               deshabilitado={ocupado}
               alEntrar={(s) => void entrarCon(s)}
               alFallar={setError}
@@ -197,13 +225,55 @@ export default function Entrar({ onEntro }: { onEntro: (s: SesionGuardada) => vo
             />
             <Text style={[T.apoyo, { marginBottom: 8 }]}>
               Enviado a {medio === 'correo' ? correo.trim() : telefono}. Vence en 5 minutos.
+              {medio === 'correo' ? '\nSi no lo ves en un minuto, revisa la carpeta de spam.' : ''}
             </Text>
             {pista ? <Aviso texto={pista} tono="aviso" /> : null}
 
+            {pideCorreo ? (
+              <>
+                <Text style={[T.seccion, { marginBottom: E.s }]}>Código que llegó a tu correo</Text>
+                <TextInput
+                  style={[e.campo, e.campoCodigo]}
+                  value={codigoCorreo}
+                  onChangeText={(t) => setCodigoCorreo(t.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="000000"
+                  placeholderTextColor={C.borde}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  editable={!ocupado}
+                  onSubmitEditing={entrar}
+                />
+                <Text style={[T.apoyo, { marginBottom: 8 }]}>
+                  Hace tiempo que no entras. Para confirmar que eres tú, te mandamos otro
+                  código a {pideCorreo.correo}. Si ya no tienes ese correo, llama a la feria.
+                </Text>
+                {pideCorreo.codigoDev ? (
+                  <Aviso texto={`Código de prueba del correo: ${pideCorreo.codigoDev}`} tono="aviso" />
+                ) : null}
+              </>
+            ) : null}
+            {pideClave ? (
+              <>
+                <Text style={[T.seccion, { marginBottom: E.s }]}>Tu clave de operador</Text>
+                <TextInput
+                  style={[e.campo, { fontSize: 18 }]}
+                  value={clave}
+                  onChangeText={setClave}
+                  placeholder="Clave"
+                  placeholderTextColor={C.textoSuave}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!ocupado}
+                  onSubmitEditing={entrar}
+                />
+              </>
+            ) : null}
             <Boton
               titulo={ocupado ? 'ENTRANDO…' : 'ENTRAR'}
               onPress={entrar}
-              deshabilitado={ocupado || codigo.length !== 6}
+              deshabilitado={ocupado || codigo.length !== 6 || (pideClave && !clave)
+                || (!!pideCorreo && codigoCorreo.length !== 6)}
             />
             <View style={{ marginTop: 10 }}>
               <Boton
@@ -212,6 +282,10 @@ export default function Entrar({ onEntro }: { onEntro: (s: SesionGuardada) => vo
                 deshabilitado={ocupado}
                 onPress={() => {
                   setPaso('telefono');
+                  setPideClave(false);
+                  setClave('');
+                  setPideCorreo(null);
+                  setCodigoCorreo('');
                   setCodigo('');
                   setPista(null);
                   setError(null);

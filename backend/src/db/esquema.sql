@@ -335,3 +335,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_pagos_confirmado
 
 CREATE INDEX IF NOT EXISTS idx_pedidos_sin_pagar
   ON pedidos(creado_at) WHERE estado = 'PENDIENTE_PAGO';
+
+-- Quién está haciendo latir el motor. Cuando el servidor corre como
+-- función (Supabase) puede haber dos copias vivas a la vez, y otra
+-- en el computador del operador: solo late la que tiene el turno, y
+-- lo pierde si deja de marcar por unos segundos.
+CREATE TABLE IF NOT EXISTS motor (
+  id     integer PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  dueno  text NOT NULL,
+  visto  timestamptz NOT NULL DEFAULT now()
+);
+
+-- Fotos guardadas en la base. Una función sin servidor no tiene
+-- disco propio: las fotos de referencia (`ref/<producto>`) y las que
+-- sube el operador (`foto/<nombre>`) se leen de acá cuando no están
+-- en el disco.
+CREATE TABLE IF NOT EXISTS archivos (
+  nombre    text PRIMARY KEY,
+  mime      text NOT NULL,
+  datos     bytea NOT NULL,
+  creado_at timestamptz NOT NULL DEFAULT now()
+);

@@ -110,5 +110,208 @@
     "autor": "George Chernilevsky",
     "licencia": "Public domain",
     "pagina": "https://commons.wikimedia.org/wiki/File:Cucurbita_moschata_Butternut_2012_G2.jpg"
+  },
+  "p-choclo": {
+    "archivo": "p-choclo.jpg",
+    "titulo": "Raw Sweet Corn.jpg",
+    "autor": "Bim24",
+    "licencia": "CC BY 4.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Raw_Sweet_Corn.jpg"
+  },
+  "p-pimenton": {
+    "archivo": "p-pimenton.jpg",
+    "titulo": "Red bell pepper.jpg",
+    "autor": "AntanO",
+    "licencia": "CC BY-SA 4.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Red_bell_pepper.jpg"
+  },
+  "p-ajo": {
+    "archivo": "p-ajo.jpg",
+    "titulo": "Opened garlic bulb with garlic clove.jpg",
+    "autor": "Dubravko Sorić SoraZG on Flickr",
+    "licencia": "CC BY 2.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Opened_garlic_bulb_with_garlic_clove.jpg"
+  },
+  "p-cilantro": {
+    "archivo": "p-cilantro.jpg",
+    "titulo": "Koriander (Coriandrum sativum) Frische Bündel, beim Türken in MA--Josef Schlaghecken.jpg",
+    "autor": "Schlaghecken Josef",
+    "licencia": "CC BY-SA 4.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Koriander_(Coriandrum_sativum)_Frische_B%C3%BCndel,_beim_T%C3%BCrken_in_MA--Josef_Schlaghecken.jpg"
+  },
+  "p-perejil": {
+    "archivo": "p-perejil.jpg",
+    "titulo": "Liat Portal for Foodie Disorder - Parsley.jpg",
+    "autor": "HaJunkiyada",
+    "licencia": "CC BY-SA 4.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Liat_Portal_for_Foodie_Disorder_-_Parsley.jpg"
+  },
+  "p-apio": {
+    "archivo": "p-apio.jpg",
+    "titulo": "Celery (1).jpg",
+    "autor": "Renee Comet (Photographer)",
+    "licencia": "Public domain",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Celery_(1).jpg"
+  },
+  "p-betarraga": {
+    "archivo": "p-betarraga.jpg",
+    "titulo": "Beta vulgaris var conditiva Буряк столовий - оптимальний розмір.jpg",
+    "autor": "Zenon Sych",
+    "licencia": "CC BY-SA 4.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Beta_vulgaris_var_conditiva_%D0%91%D1%83%D1%80%D1%8F%D0%BA_%D1%81%D1%82%D0%BE%D0%BB%D0%BE%D0%B2%D0%B8%D0%B9_-_%D0%BE%D0%BF%D1%82%D0%B8%D0%BC%D0%B0%D0%BB%D1%8C%D0%BD%D0%B8%D0%B9_%D1%80%D0%BE%D0%B7%D0%BC%D1%96%D1%80.jpg"
+  },
+  "p-repollo": {
+    "archivo": "p-repollo.jpg",
+    "titulo": "Cabbage (Brassica oleracea) Black rot (35710676671).jpg",
+    "autor": "Scot Nelson",
+    "licencia": "CC0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Cabbage_(Brassica_oleracea)_Black_rot_(35710676671).jpg"
+  },
+  "p-brocoli": {
+    "archivo": "p-brocoli.jpg",
+    "titulo": "Liat Portal for Foodie Disorder - Fresh Broccoli.jpg",
+    "autor": "HaJunkiyada",
+    "licencia": "CC BY-SA 4.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Liat_Portal_for_Foodie_Disorder_-_Fresh_Broccoli.jpg"
+  },
+  "p-acelga": {
+    "archivo": "p-acelga.jpg",
+    "titulo": "Rainbow chard for sale at the Campbell farmers market.jpg",
+    "autor": "Grendelkhan",
+    "licencia": "CC BY-SA 4.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Rainbow_chard_for_sale_at_the_Campbell_farmers_market.jpg"
+  },
+  "p-zapallo-italiano": {
+    "archivo": "p-zapallo-italiano.jpg",
+    "titulo": "Zucchini-Whole.jpg",
+    "autor": "Evan-Amos",
+    "licencia": "Public domain",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Zucchini-Whole.jpg"
+  },
+  "p-pepino": {
+    "archivo": "p-pepino.jpg",
+    "titulo": "Cucumber from Denmark.jpg",
+    "autor": "WiseMan42",
+    "licencia": "CC0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Cucumber_from_Denmark.jpg"
+  },
+  "p-poroto-verde": {
+    "archivo": "p-poroto-verde.jpg",
+    "titulo": "Green beans 169clue.jpg",
+    "autor": "16:9clue",
+    "licencia": "CC BY 2.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Green_beans_169clue.jpg"
+  },
+  "p-limon": {
+    "archivo": "p-limon.jpg",
+    "titulo": "Lemon.jpg",
+    "autor": "André Karwath aka Aka",
+    "licencia": "CC BY-SA 2.5",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Lemon.jpg"
+  },
+  "p-pera": {
+    "archivo": "p-pera.jpg",
+    "titulo": "Four pears.jpg",
+    "autor": "Rhododendrites",
+    "licencia": "CC BY-SA 4.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Four_pears.jpg"
+  },
+  "p-uva": {
+    "archivo": "p-uva.jpg",
+    "titulo": "Green grape cluster on a white background.jpg",
+    "autor": "Endotoo",
+    "licencia": "CC0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Green_grape_cluster_on_a_white_background.jpg"
+  },
+  "p-kiwi": {
+    "archivo": "p-kiwi.jpg",
+    "titulo": "Kiwi aka.jpg",
+    "autor": "André Karwath aka Aka",
+    "licencia": "CC BY-SA 2.5",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Kiwi_aka.jpg"
+  },
+  "p-mandarina": {
+    "archivo": "p-mandarina.jpg",
+    "titulo": "Mandarin Oranges (Citrus Reticulata).jpg",
+    "autor": "Joe Ravi",
+    "licencia": "CC BY-SA 3.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Mandarin_Oranges_(Citrus_Reticulata).jpg"
+  },
+  "p-salmon": {
+    "archivo": "p-salmon.jpg",
+    "titulo": "Raw salmon fillets.jpg",
+    "autor": "FULVIO_TOGNON",
+    "licencia": "CC0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Raw_salmon_fillets.jpg"
+  },
+  "p-jurel": {
+    "archivo": "p-jurel.jpg",
+    "titulo": "Trachurus trachurus.Chicharro.jpg",
+    "autor": "Luis Miguel Bugallo Sánchez ( Lmbuga Commons )( Lmbuga Galipedia )",
+    "licencia": "CC BY-SA 2.5 es",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Trachurus_trachurus.Chicharro.jpg"
+  },
+  "p-queso-fresco": {
+    "archivo": "p-queso-fresco.jpg",
+    "titulo": "Homemade queso blanco and olive bread (16215994960).jpg",
+    "autor": "Ruth Hartnup from Vancouver, Canada",
+    "licencia": "CC BY 2.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Homemade_queso_blanco_and_olive_bread_(16215994960).jpg"
+  },
+  "p-queso-mantecoso": {
+    "archivo": "p-queso-mantecoso.jpg",
+    "titulo": "Winterswijk (NL), Wochenmarkt -- 2024 -- 4337.jpg",
+    "autor": "Dietmar Rabich",
+    "licencia": "CC BY-SA 4.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Winterswijk_(NL),_Wochenmarkt_--_2024_--_4337.jpg"
+  },
+  "p-queso-cabra": {
+    "archivo": "p-queso-cabra.jpg",
+    "titulo": "Goat cheese with thymus.JPG",
+    "autor": "M0tty",
+    "licencia": "CC BY-SA 3.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Goat_cheese_with_thymus.JPG"
+  },
+  "p-quesillo": {
+    "archivo": "p-quesillo.jpg",
+    "titulo": "Ricotta.jpeg",
+    "autor": "Paoletta S.",
+    "licencia": "CC BY 2.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Ricotta.jpeg"
+  },
+  "p-porotos": {
+    "archivo": "p-porotos.jpg",
+    "titulo": "Pinto Beans Seeds.jpg",
+    "autor": "Sanjay Acharya",
+    "licencia": "CC BY-SA 4.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Pinto_Beans_Seeds.jpg"
+  },
+  "p-lentejas": {
+    "archivo": "p-lentejas.jpg",
+    "titulo": "Split Red Lentil.jpg",
+    "autor": "Sanjay Acharya",
+    "licencia": "CC BY-SA 4.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Split_Red_Lentil.jpg"
+  },
+  "p-nueces": {
+    "archivo": "p-nueces.jpg",
+    "titulo": "W Nuss Gr 99.jpg",
+    "autor": "Horst Frank",
+    "licencia": "CC BY-SA 3.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:W_Nuss_Gr_99.jpg"
+  },
+  "p-miel": {
+    "archivo": "p-miel.jpg",
+    "titulo": "Three French monofloral honey jars.jpg",
+    "autor": "Hayden Soloviev",
+    "licencia": "CC BY 4.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Three_French_monofloral_honey_jars.jpg"
+  },
+  "p-mote": {
+    "archivo": "p-mote.png",
+    "titulo": "Wheat grains, a yellow bean among vitreous kernels.png",
+    "autor": "Thamizhpparithi Maari",
+    "licencia": "CC BY-SA 3.0",
+    "pagina": "https://commons.wikimedia.org/wiki/File:Wheat_grains,_a_yellow_bean_among_vitreous_kernels.png"
   }
 }

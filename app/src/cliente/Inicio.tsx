@@ -20,7 +20,8 @@ import { simboloProducto, simboloRubro } from '../simbolos';
  */
 export default function Inicio({ navegar }: { navegar: (p: string, args?: any) => void }) {
   const { datos: catalogo, error, recargar } = useRecurso<any[]>('/catalogo');
-  const { datos: feria } = useRecurso<any>('/feria/estado');
+  const { feriaId } = useCliente();
+  const { datos: feria } = useRecurso<any>(`/feria/estado?feria=${encodeURIComponent(feriaId)}`);
   const [busqueda, setBusqueda] = useState('');
   const { perfil, unidades } = useCliente();
   const relleno = useRellenoPestanas();
@@ -134,7 +135,7 @@ export default function Inicio({ navegar }: { navegar: (p: string, args?: any) =
           />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={T.encabezado}>Feria Av. Argentina</Text>
+          <Text style={T.encabezado}>{feria?.nombre ?? 'Tu feria'}</Text>
           <Text style={[T.micro, {
             color: feria?.aceptandoPedidos ? C.verde : C.naranja,
           }]}>

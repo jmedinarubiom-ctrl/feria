@@ -56,7 +56,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Feria usa tu ubicación mientras llevas un pedido, para que el cliente y la operación sepan por dónde vas."
+          "locationWhenInUsePermission": "Feria usa tu ubicación para marcar el punto exacto donde entregar tu pedido y, si repartes, para mostrar por dónde vas mientras llevas uno."
         }
       ],
       [
@@ -68,7 +68,10 @@
       ],
       "expo-apple-authentication"
     ],
-    "scheme": "feria",
+    "scheme": [
+      "feria",
+      "cl.feria.app"
+    ],
     "notification": {
       "iosDisplayInForeground": true,
       "androidMode": "default"

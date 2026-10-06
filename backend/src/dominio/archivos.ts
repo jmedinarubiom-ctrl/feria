@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, existsSync, writeFileSync, statSync } from 'node:fs';
+import { consultarUno, ejecutar, nombreMotor } from '../db/index.ts';
 import { join } from 'node:path';
 
 import { CONFIG } from '../config.ts';
@@ -61,7 +62,9 @@ export function tipoDeImagen(datos: Buffer): { mime: string; ext: string } | nul
  * no deja dos copias, y volver a subirla después de un respaldo da
  * el mismo nombre.
  */
-export function guardarFoto(datos: Buffer): { camino: string; bytes: number; mime: string } {
+export function guardarFoto(datos: Buffer): {
+  camino: string; bytes: number; mime: string; nombre: string; datos: Buffer;
+} {
   if (datos.length === 0) throw new ErrorArchivo(422, 'La foto llegó vacía.');
   if (datos.length > MAX_FOTO) {
     throw new ErrorArchivo(413,
@@ -72,11 +75,18 @@ export function guardarFoto(datos: Buffer): { camino: string; bytes: number; mim
   if (!tipo) throw new ErrorArchivo(422, 'El archivo no es una imagen JPEG, PNG ni WebP.');
 
   const nombre = createHash('sha256').update(datos).digest('hex').slice(0, 32) + '.' + tipo.ext;
-  mkdirSync(CARPETA, { recursive: true });
-  const destino = join(CARPETA, nombre);
-  if (!existsSync(destino)) writeFileSync(destino, datos);
+  try {
+    mkdirSync(CARPETA, { recursive: true });
+    const destino = join(CARPETA, nombre);
+    if (!existsSync(destino)) writeFileSync(destino, datos);
+  } catch (e) {
+    // Sin disco donde escribir (el servidor corre como función): la
+    // foto vive solo en la base. Con PGlite no hay otra copia, así
+    // que ahí el error sí es un error.
+    if (!nombreMotor().startsWith('postgres')) throw e;
+  }
 
-  return { camino: `/fotos/${nombre}`, bytes: datos.length, mime: tipo.mime };
+  return { camino: `/fotos/${nombre}`, bytes: datos.length, mime: tipo.mime, nombre, datos };
 }
 
 /**
@@ -105,4 +115,22 @@ export function desdeBase64(valor: unknown): Buffer {
   const datos = Buffer.from(limpio, 'base64');
   if (datos.length === 0) throw new ErrorArchivo(422, 'La foto no se pudo leer.');
   return datos;
+}
+
+/**
+ * La copia en la base. Solo con Postgres: ahí puede haber un
+ * servidor sin disco (la función) leyendo lo que otro guardó.
+ */
+export async function guardarEnLaBase(nombre: string, mime: string, datos: Buffer): Promise<void> {
+  if (!nombreMotor().startsWith('postgres')) return;
+  await ejecutar(
+    `INSERT INTO archivos (nombre, mime, datos) VALUES (?, ?, ?)
+     ON CONFLICT (nombre) DO NOTHING`, nombre, mime, datos);
+}
+
+export async function leerDeLaBase(nombre: string): Promise<{ datos: Buffer; mime: string } | null> {
+  if (!nombreMotor().startsWith('postgres')) return null;
+  const f = await consultarUno<{ mime: string; datos: Uint8Array }>(
+    'SELECT mime, datos FROM archivos WHERE nombre = ?', nombre);
+  return f ? { datos: Buffer.from(f.datos), mime: f.mime } : null;
 }

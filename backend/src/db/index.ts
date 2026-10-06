@@ -82,9 +82,14 @@ async function motorPostgres(url: string): Promise<Motor> {
     connectionString: url,
     ssl: url.includes('localhost') || url.includes('sslmode=disable')
       ? undefined
-      : { rejectUnauthorized: false },
+      // Con el certificado de la autoridad del proveedor (`PG_CA`,
+      // el contenido del .pem) se verifica contra quién se habla.
+      // Sin él se cifra igual, pero se acepta cualquier servidor.
+      : process.env.PG_CA
+        ? { ca: process.env.PG_CA, rejectUnauthorized: true }
+        : { rejectUnauthorized: false },
     max: Number(process.env.PG_POOL_MAX ?? 10),
-    idleTimeoutMillis: 30_000,
+    idleTimeoutMillis: Number(process.env.PG_POOL_REPOSO_MS ?? 30_000),
     // Sin esto, con la base caída cada petición espera para siempre
     // una conexión que no llega y el servidor parece colgado.
     connectionTimeoutMillis: 10_000,
@@ -175,13 +180,15 @@ async function motorPGlite(ruta?: string): Promise<Motor> {
  * levanta PGlite — así `npm start` funciona recién clonado el
  * repositorio y `npm test` no necesita nada instalado.
  */
-export async function abrirDB(opciones: { url?: string; memoria?: boolean } = {}): Promise<void> {
+export async function abrirDB(
+  opciones: { url?: string; memoria?: boolean; sinMigrar?: boolean } = {},
+): Promise<void> {
   const url = opciones.url ?? process.env.DATABASE_URL;
   motor = url
     ? await motorPostgres(url)
     : await motorPGlite(opciones.memoria ? undefined : (process.env.FERIA_DB ?? join(aqui, '../../datos')));
 
-  await migrar();
+  if (!opciones.sinMigrar) await migrar();
 }
 
 /**
@@ -220,9 +227,36 @@ export async function migrar(): Promise<void> {
       await c.consulta('INSERT INTO migraciones (nombre) VALUES ($1)', [archivo]);
       console.log(`[migración] ${archivo}`);
     }
+    if (motor.nombre === 'postgres') await cerrarAccesoDirecto(c);
   } finally {
     c.liberar();
   }
+}
+
+/**
+ * Deja las tablas accesibles solo para el backend.
+ *
+ * Las bases administradas tipo Supabase publican cada tabla del
+ * esquema `public` en una API propia, a la que se entra con una
+ * llave que ellos mismos consideran pública. Sin esto, quien tenga
+ * la dirección del proyecto y esa llave podría leer clientes,
+ * pedidos y sesiones sin pasar por el backend.
+ *
+ * Con la seguridad por fila activada y ninguna política definida,
+ * esos accesos externos no ven ni una fila. El backend no se
+ * entera: entra como dueño de las tablas, y al dueño no le aplica.
+ * Se repite en cada arranque para cubrir las tablas que agregue
+ * una migración nueva.
+ */
+async function cerrarAccesoDirecto(c: Cliente): Promise<void> {
+  await c.script(`
+    DO $$
+    DECLARE t record;
+    BEGIN
+      FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+        EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t.tablename);
+      END LOOP;
+    END $$;`);
 }
 
 export const nombreMotor = (): string => motor?.nombre ?? '(sin abrir)';

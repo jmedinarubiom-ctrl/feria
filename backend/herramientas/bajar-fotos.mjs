@@ -6,13 +6,18 @@
  * para mostrar un tomate. Las fotos quedan versionadas en el
  * repositorio y viajan dentro de la imagen de Docker.
  *
- *   node herramientas/bajar-fotos.mjs
+ *   node herramientas/bajar-fotos.mjs              las que falten
+ *   node herramientas/bajar-fotos.mjs p-ajo p-miel  esas, aunque ya estén
+ *
+ * Las que ya están no se vuelven a bajar: la búsqueda de Commons
+ * cambia con el tiempo y repetirla le cambiaría la foto a un
+ * producto que ya estaba revisado.
  *
  * Guarda `creditos.json` en la misma carpeta. Las licencias CC
  * exigen atribución: bajar la foto sin anotar de quién es no es una
  * opción, así que el archivo se escribe en el mismo paso.
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -44,7 +49,40 @@ const BUSCAR = [
   ['p-choritos', 'cooked mussels dish'],
   ['p-huevos', 'chicken eggs carton'],
   ['p-aceitunas', 'black olives bowl'],
+  // Los que se sumaron al catálogo en octubre de 2026.
+  ['p-choclo', 'sweet corn cobs fresh'],
+  ['p-pimenton', 'red bell pepper white background'],
+  ['p-ajo', 'garlic bulbs white background'],
+  ['p-cilantro', 'Coriandrum sativum fresh leaves bunch'],
+  ['p-perejil', 'parsley bunch fresh'],
+  ['p-apio', 'celery white background'],
+  ['p-betarraga', 'beetroots Beta vulgaris roots white background'],
+  ['p-repollo', 'white cabbage Brassica oleracea capitata head'],
+  ['p-brocoli', 'broccoli'],
+  ['p-acelga', 'Swiss chard'],
+  ['p-zapallo-italiano', 'zucchini white background'],
+  ['p-pepino', 'cucumber white background'],
+  ['p-poroto-verde', 'green beans fresh pods'],
+  ['p-limon', 'lemons white background'],
+  ['p-pera', 'pear fruit white background'],
+  ['p-uva', 'grapes white background'],
+  ['p-kiwi', 'kiwifruit white background'],
+  ['p-mandarina', 'mandarin orange fruit'],
+  ['p-salmon', 'raw salmon fillet'],
+  ['p-jurel', 'Trachurus trachurus'],
+  ['p-queso-fresco', 'fresh cheese'],
+  ['p-queso-mantecoso', 'Gouda cheese'],
+  ['p-queso-cabra', 'goat cheese'],
+  ['p-quesillo', 'ricotta'],
+  ['p-porotos', 'white beans'],
+  ['p-lentejas', 'lentils'],
+  ['p-nueces', 'walnuts white background'],
+  ['p-miel', 'honey jar'],
+  ['p-mote', 'wheat grain closeup'],
 ];
+
+/** Solo licencias que permiten usar la foto en una app comercial. */
+const licenciaSirve = (l) => /^(CC BY(-SA)?( \d|$)|CC0|Public domain|PDM)/i.test(l) && !/NC|ND/i.test(l);
 
 const limpiar = (s) => String(s ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -63,9 +101,14 @@ const esEscaneoDeLibro = (titulo) =>
 const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
 
 mkdirSync(DESTINO, { recursive: true });
-const creditos = {};
+const ARCHIVO_CREDITOS = join(DESTINO, 'creditos.json');
+const creditos = existsSync(ARCHIVO_CREDITOS)
+  ? JSON.parse(readFileSync(ARCHIVO_CREDITOS, 'utf8')) : {};
+const pedidos = process.argv.slice(2);
 
 for (const [id, termino] of BUSCAR) {
+  if (pedidos.length ? !pedidos.includes(id) : !!creditos[id]) continue;
+
   const api = new URL('https://commons.wikimedia.org/w/api.php');
   api.search = new URLSearchParams({
     action: 'query', format: 'json', generator: 'search',
@@ -84,6 +127,7 @@ for (const [id, termino] of BUSCAR) {
     const i = p.imageinfo?.[0];
     if (!i || !/^image\/(jpeg|png)$/.test(i.mime) || !i.thumburl) continue;
     if (esEscaneoDeLibro(p.title)) continue;
+    if (!licenciaSirve(limpiar(i.extmetadata?.LicenseShortName?.value))) continue;
     const img = await fetch(i.thumburl, { headers: { 'user-agent': UA } });
     if (!img.ok) continue;
 
@@ -105,5 +149,5 @@ for (const [id, termino] of BUSCAR) {
   await dormir(1100);
 }
 
-writeFileSync(join(DESTINO, 'creditos.json'), JSON.stringify(creditos, null, 2) + '\n');
+writeFileSync(ARCHIVO_CREDITOS, JSON.stringify(creditos, null, 2) + '\n');
 console.log(`\n${Object.keys(creditos).length} fotos en ${DESTINO}`);

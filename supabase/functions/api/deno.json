@@ -1,0 +1,8 @@
+{
+  "imports": {
+    "pg": "npm:pg@8.23.0",
+    "nodemailer": "npm:nodemailer@6.10.1",
+    "ws": "./stubs/ws.ts",
+    "@electric-sql/pglite": "./stubs/pglite.ts"
+  }
+}

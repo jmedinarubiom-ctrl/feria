@@ -124,17 +124,48 @@ async function iniciarPagoDeVerdad(pedidoId: string, email: string): Promise<Pag
     return { url: null, pagoId, yaPagado: false };
   }
 
-  await ejecutar(
-    `INSERT INTO pagos (id, pedido_id, proveedor, orden_comercio, monto, estado)
-     VALUES (?, ?, ?, ?, ?, 'INICIADO')`,
-    pagoId, pedidoId, via.nombre, ordenComercio, pedido.total_venta);
-
-  const creado = await via.crear({
-    ordenComercio,
-    monto: pedido.total_venta,
-    concepto: `Feria — pedido #${pedido.numero}`,
-    email,
+  // Con el servidor corriendo en varias copias, el mapa de arriba no
+  // alcanza: dos toques pueden caer en copias distintas. El candado
+  // sobre el pedido hace que una sola anote el cobro; la otra lo ve
+  // «en camino» y espera a que tenga su dirección de pago.
+  const ajeno = await enTransaccion(async () => {
+    await consultarUno('SELECT id FROM pedidos WHERE id = ? FOR UPDATE', pedidoId);
+    const enCamino = await consultarUno<Fila>(
+      `SELECT id FROM pagos
+        WHERE pedido_id = ? AND estado = 'INICIADO' AND proveedor <> 'dev'
+          AND (url_pago IS NOT NULL OR creado_at > now() - interval '10 seconds')
+        ORDER BY creado_at DESC LIMIT 1`, pedidoId);
+    if (enCamino) return enCamino.id as string;
+    await ejecutar(
+      `INSERT INTO pagos (id, pedido_id, proveedor, orden_comercio, monto, estado)
+       VALUES (?, ?, ?, ?, ?, 'INICIADO')`,
+      pagoId, pedidoId, via.nombre, ordenComercio, pedido.total_venta);
+    return null;
   });
+  if (ajeno) {
+    for (let i = 0; i < 16; i++) {
+      const p = await consultarUno<Fila>('SELECT estado, url_pago FROM pagos WHERE id = ?', ajeno);
+      if (p?.url_pago && p.estado === 'INICIADO') return { url: p.url_pago, pagoId: ajeno, yaPagado: false };
+      if (p?.estado !== 'INICIADO') break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    throw new ErrorPago(409, 'Ya se está preparando el pago de este pedido. Intenta de nuevo en unos segundos.');
+  }
+
+  let creado;
+  try {
+    creado = await via.crear({
+      ordenComercio,
+      monto: pedido.total_venta,
+      concepto: `Feria — pedido #${pedido.numero}`,
+      email,
+    });
+  } catch (e) {
+    // El cobro no llegó a existir en la pasarela: se anula para que
+    // el reintento no se quede esperándolo.
+    await ejecutar(`UPDATE pagos SET estado = 'ANULADO' WHERE id = ? AND estado = 'INICIADO'`, pagoId);
+    throw e;
+  }
 
   await ejecutar(
     'UPDATE pagos SET referencia_externa = ?, url_pago = ? WHERE id = ?',

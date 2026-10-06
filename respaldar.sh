@@ -9,7 +9,17 @@
 # lleve la base pero no las fotos deja un catálogo con huecos, y eso
 # se descubre el día que hace falta restaurar.
 #
+# El respaldo trae nombres, teléfonos y direcciones de clientes.
+# Con RESPALDO_CLAVE definida sale cifrado (AES-256):
+#
+#   RESPALDO_CLAVE='una frase larga' ./respaldar.sh
+#
+# Sin esa variable sale sin cifrar y avisa. La clave no se guarda en
+# ninguna parte: si se pierde, el respaldo no se puede abrir.
+#
 # Para restaurar:
+#   (si está cifrado)  openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+#                        -in feria-AAAA-MM-DD.tar.gz.enc -out feria.tar.gz
 #   tar xzf feria-AAAA-MM-DD.tar.gz -C /donde/sea
 #   - con Postgres:  psql "$DATABASE_URL" < base.sql
 #   - con PGlite:    copiar la carpeta datos/ de vuelta
@@ -54,13 +64,27 @@ else
 fi
 
 ARCHIVO="$DESTINO/feria-$FECHA.tar.gz"
-tar czf "$ARCHIVO" -C "$TRABAJO" .
-echo
-echo "✓ $ARCHIVO  ($(du -h "$ARCHIVO" | cut -f1))"
+if [ -n "${RESPALDO_CLAVE:-}" ]; then
+  # La clave viaja por variable de entorno, no por argumento: los
+  # argumentos de un proceso los ve cualquiera con `ps`.
+  ARCHIVO="$ARCHIVO.enc"
+  tar czf - -C "$TRABAJO" . \
+    | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:RESPALDO_CLAVE -out "$ARCHIVO"
+  chmod 600 "$ARCHIVO"
+  echo
+  echo "✓ $ARCHIVO  ($(du -h "$ARCHIVO" | cut -f1), cifrado)"
+else
+  tar czf "$ARCHIVO" -C "$TRABAJO" .
+  chmod 600 "$ARCHIVO"
+  echo
+  echo "✓ $ARCHIVO  ($(du -h "$ARCHIVO" | cut -f1))"
+  echo "  ⚠ SIN CIFRAR: trae datos personales de clientes. Para cifrarlo,"
+  echo "    define RESPALDO_CLAVE antes de correr esto."
+fi
 
 # Dejar solo los últimos 14: un respaldo que llena el disco deja de
 # ser un respaldo y se convierte en una caída.
-ls -1t "$DESTINO"/feria-*.tar.gz 2>/dev/null | tail -n +15 | while read -r viejo; do
+ls -1t "$DESTINO"/feria-*.tar.gz "$DESTINO"/feria-*.tar.gz.enc 2>/dev/null | tail -n +15 | while read -r viejo; do
   rm -f "$viejo"
   echo "  (borrado el viejo $(basename "$viejo"))"
 done

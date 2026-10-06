@@ -88,13 +88,27 @@ esas.
 | Ingreso | Para quién | Qué hay que configurar | Costo |
 |---|---|---|---|
 | Código por SMS | Todos. Es el único que sirve para feriantes y repartidores | `TWILIO_*` (cuenta en twilio.com) | Cada mensaje se paga |
-| Código al correo | Compradores | `RESEND_API_KEY` y `CORREO_REMITENTE` (cuenta en resend.com y un dominio verificado ahí) | Tiene plan gratuito |
+| Código al correo | Compradores | `CORREO_SMTP_USUARIO` y `CORREO_SMTP_CLAVE`: una cuenta de Gmail con «contraseña de aplicación». Más adelante, con dominio propio, `RESEND_API_KEY` | Gratis (Gmail deja mandar unos 500 al día) |
 | Google | Compradores | `GOOGLE_CLIENT_IDS` en el servidor y los mismos identificadores en la app | Gratis |
 | Apple | Compradores, solo en iPhone | `APPLE_CLIENT_IDS=cl.feria.app` y la cuenta de Apple Developer | USD 99 al año |
 
 A tu equipo le puedes seguir dictando el código desde el panel sin
 gastar un SMS. Para abrirle a compradores alcanza con **uno** de los
 cuatro: lo más barato es el código al correo.
+
+**Código al correo con Gmail**, que es lo más rápido:
+
+1. En la cuenta de Google desde la que se va a mandar, activa la
+   verificación en dos pasos.
+2. En [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+   crea una «contraseña de aplicación». Son 16 letras; no es la
+   clave normal de la cuenta.
+3. Pon la cuenta en `CORREO_SMTP_USUARIO` y esas 16 letras en
+   `CORREO_SMTP_CLAVE`.
+4. Comprueba que sale: `cd backend && npm run probar-correo -- tu@correo.cl`
+
+Conviene una cuenta de Gmail solo para esto, no la personal: es la
+dirección que van a ver los clientes y la que queda con esa clave.
 
 **Google**, cuando lo quieras encender:
 
@@ -202,7 +216,59 @@ certificado raíz conviene usarlo.
 
 ---
 
+## Antes de abrir: la seguridad de las cuentas
+
+- **Ponle clave a tu cuenta de operador.** En el panel, botón
+  «Poner clave». Desde ahí, para entrar hace falta el código del
+  teléfono y la clave. Si la olvidas, se borra a mano en la base:
+  `UPDATE operadores SET clave_hash = NULL`.
+- **Define `PROXIES_DE_CONFIANZA`** en el servidor (normalmente `1`).
+  Sin eso, el freno de peticiones se puede esquivar. Comprueba que
+  quedó bien: desde dos conexiones distintas, cada una tiene que
+  tener su propio límite.
+
+---
+
+## Antes de abrir: lo legal
+
+La app ya tiene la parte técnica de la protección de datos. Lo que
+falta no es código:
+
+- **Los textos son un borrador.** `backend/src/legal/terminos.md` y
+  `privacidad.md` los escribió el equipo técnico y lo dicen en su
+  primera línea. Un abogado tiene que revisarlos y reemplazarlos.
+  Después cambia `LEGAL_VERSION` (por ejemplo `2026-11`): con eso la
+  app le vuelve a pedir la aceptación a todos. Mientras sean el
+  borrador, el servidor lo avisa al arrancar en producción.
+- La política queda publicada en `https://TU-DIRECCION/legal/privacidad`,
+  que es la dirección que piden las tiendas de apps.
+- **Boleta electrónica (SII)**, que sigue pendiente.
+
+Lo que ya hace sola:
+
+| | |
+|---|---|
+| Aceptación de términos | Una vez por versión, al entrar. Queda guardado quién y cuándo. |
+| Copia de mis datos | Perfil → «Descargar una copia de mis datos». |
+| Eliminar la cuenta | Perfil → «Eliminar mi cuenta». Borra los datos personales; de las ventas queda el monto, sin nombre ni dirección. |
+| Borrado automático | Ubicación de repartidores a los 30 días, códigos al día, carros sin pagar a los 30 días. |
+| Tráfico cifrado | El build `produccion` no permite `http://`. |
+| Registros | En producción los códigos de ingreso no se escriben en el registro. |
+
+Si un feriante o un repartidor pide que borren sus datos, hoy no hay
+botón: se le da de baja en el panel y el borrado hay que hacerlo a
+mano en la base.
+
+---
+
 ## Respaldos
+
+Traen datos personales de clientes: guárdalos cifrados.
+
+    RESPALDO_CLAVE='una frase larga' ./respaldar.sh
+
+Sin esa variable el respaldo sale sin cifrar y lo avisa. La clave no
+se guarda en ninguna parte: anótala donde no se pierda.
 
 El script está, pero nadie lo corre solo:
 

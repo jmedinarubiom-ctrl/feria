@@ -3,7 +3,7 @@ import {
   Alert, Platform, Pressable, StatusBar, StyleSheet, Text, View,
 } from 'react-native';
 
-import { api, fijarToken, fijarServidor, cuandoExpireLaSesion, ErrorApi } from './src/api';
+import { api, fijarToken, fijarServidor, buscarServidor, cuandoExpireLaSesion, ErrorApi } from './src/api';
 import {
   leerSesion, guardarSesion, borrarSesion, leerServidor, type SesionGuardada,
 } from './src/almacen';
@@ -17,6 +17,7 @@ import { Fondo } from './src/Fondo';
 import { Cabecera, Cargando } from './src/ui';
 import { activarPush, alTocarNotificacion, type EstadoPush } from './src/notificaciones';
 import Entrar from './src/pantallas/Entrar';
+import ConTerminos from './src/Terminos';
 import AppCliente from './src/cliente/Navegador';
 import Feriante from './src/pantallas/Feriante';
 import Operador from './src/pantallas/Operador';
@@ -74,6 +75,7 @@ function Raiz() {
       // arranque.
       const elegido = await leerServidor();
       if (elegido) fijarServidor(elegido);
+      else await buscarServidor();
 
       const guardada = await leerSesion();
       if (!guardada) return setEstado({ fase: 'fuera' });
@@ -146,13 +148,17 @@ function Raiz() {
     return (
       <>
         <StatusBar barStyle="dark-content" backgroundColor={C.superficie} />
-        <AppCliente
-          telefono={estado.sesion.telefono ?? ''}
-          onSalir={() => Alert.alert('Cerrar sesión', '¿Salir de tu cuenta?', [
-            { text: 'Cancelar', style: 'cancel' },
-            { text: 'Salir', style: 'destructive', onPress: () => void salir(true) },
-          ])}
-        />
+        <ConTerminos onSalir={() => void salir(true)}>
+          <AppCliente
+            telefono={estado.sesion.telefono ?? ''}
+            cuentaId={estado.sesion.actorId}
+            alEliminarCuenta={() => void salir(false)}
+            onSalir={() => Alert.alert('Cerrar sesión', '¿Salir de tu cuenta?', [
+              { text: 'Cancelar', style: 'cancel' },
+              { text: 'Salir', style: 'destructive', onPress: () => void salir(true) },
+            ])}
+          />
+        </ConTerminos>
       </>
     );
   }
@@ -207,8 +213,16 @@ function Raiz() {
         </Pressable>
       ) : null}
 
-      {sesion.rol === 'feriante' ? <Feriante ferianteId={sesion.actorId} /> : null}
-      {sesion.rol === 'repartidor' ? <Repartidor repartidorId={sesion.actorId} /> : null}
+      {sesion.rol === 'feriante' ? (
+        <ConTerminos onSalir={() => void salir(true)}>
+          <Feriante ferianteId={sesion.actorId} />
+        </ConTerminos>
+      ) : null}
+      {sesion.rol === 'repartidor' ? (
+        <ConTerminos onSalir={() => void salir(true)}>
+          <Repartidor repartidorId={sesion.actorId} />
+        </ConTerminos>
+      ) : null}
       {sesion.rol === 'operador' ? <Operador /> : null}
       </SafeAreaView>
     </View>

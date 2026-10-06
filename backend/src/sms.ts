@@ -46,11 +46,20 @@ async function porTwilio(a: string, texto: string): Promise<ResultadoSms> {
   return { enviado: true, proveedor: 'twilio' };
 }
 
+/**
+ * En producción el código no se escribe en el registro: los
+ * registros del hosting los lee más gente que la base, y con el
+ * código se entra como esa persona. Al equipo se lo dicta el
+ * operador desde el panel.
+ */
+export const paraElRegistro = (texto: string): string =>
+  process.env.NODE_ENV === 'production' ? texto.replace(/\b\d{6}\b/g, '••••••') : texto;
+
 export async function enviarSms(a: string, texto: string): Promise<ResultadoSms> {
   if (hayTwilio()) return porTwilio(a, texto);
 
   console.log(`\n  ┌─ SMS a ${a}`);
-  console.log(`  │  ${texto}`);
+  console.log(`  │  ${paraElRegistro(texto)}`);
   console.log(`  └─ (sin Twilio configurado: no se envió de verdad)\n`);
   return { enviado: true, proveedor: 'consola' };
 }

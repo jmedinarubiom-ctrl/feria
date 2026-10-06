@@ -21,6 +21,8 @@ export default function Postular() {
   const [tipo, setTipo] = useState<'feriante' | 'repartidor' | null>(null);
   const [rubros, setRubros] = useState<Array<{ id: string; nombre: string }>>([]);
   const [elegidos, setElegidos] = useState<string[]>([]);
+  const [ferias, setFerias] = useState<Array<{ id: string; nombre: string; comuna: string }>>([]);
+  const [feriaId, setFeriaId] = useState<string | null>(null);
   const [nombre, setNombre] = useState('');
   const [puesto, setPuesto] = useState('');
   const [vehiculo, setVehiculo] = useState('');
@@ -37,6 +39,9 @@ export default function Postular() {
       .catch(() => setSolicitud(null));
     api('GET', '/catalogo')
       .then((c: any[]) => setRubros(c.map((r) => ({ id: r.id, nombre: r.nombre }))))
+      .catch(() => {});
+    api('GET', '/ferias', { sinSesion: true })
+      .then((r) => setFerias(r.ferias))
       .catch(() => {});
   }, []);
 
@@ -73,7 +78,7 @@ export default function Postular() {
   }
 
   const listo = nombre.trim() && (tipo === 'feriante'
-    ? puesto.trim() && elegidos.length > 0
+    ? puesto.trim() && elegidos.length > 0 && feriaId
     : vehiculo.trim());
 
   const enviar = async () => {
@@ -81,7 +86,7 @@ export default function Postular() {
     try {
       const r = await api('POST', '/cliente/postular', {
         cuerpo: tipo === 'feriante'
-          ? { tipo, nombre: nombre.trim(), puesto: puesto.trim(), rubros: elegidos }
+          ? { tipo, nombre: nombre.trim(), puesto: puesto.trim(), rubros: elegidos, feriaId }
           : { tipo, nombre: nombre.trim(), vehiculo: vehiculo.trim() },
       });
       setSolicitud(r);
@@ -112,6 +117,19 @@ export default function Postular() {
                  placeholder="Nombre y apellido" />
           {tipo === 'feriante' ? (
             <>
+              <View>
+                <Text style={[T.micro, { marginBottom: E.xs }]}>En qué feria</Text>
+                <View style={[e.fila, { flexWrap: 'wrap' }]}>
+                  {ferias.map((f) => (
+                    <Opcion
+                      key={f.id}
+                      texto={`${f.nombre.replace(/^Feria /, '')} · ${f.comuna}`}
+                      activa={feriaId === f.id}
+                      onPress={() => setFeriaId(f.id)}
+                    />
+                  ))}
+                </View>
+              </View>
               <Campo etiqueta="Tu puesto" value={puesto} onChangeText={setPuesto}
                      placeholder="Puesto 12, sector norte" />
               <View>

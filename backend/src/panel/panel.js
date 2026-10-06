@@ -43,7 +43,12 @@ async function api(metodo, camino, cuerpo, { sinSesion = false } = {}) {
   });
   const cuerpoR = await r.json().catch(() => ({}));
   if (r.status === 401 && !sinSesion) { salir(); throw new Error('La sesión venció.'); }
-  if (!r.ok) throw new Error(cuerpoR.error ?? `Error ${r.status}`);
+  if (!r.ok) {
+    const e = new Error(cuerpoR.error ?? `Error ${r.status}`);
+    // El servidor pide la clave del operador para terminar de entrar.
+    e.pideClave = !!cuerpoR.pideClave;
+    throw e;
+  }
   return cuerpoR;
 }
 
@@ -131,7 +136,7 @@ function vistaIngreso() {
     <div class="ingreso"><div class="caja">
       <img src="/admin/marca.png" alt="" onerror="this.style.display='none'">
       <h1>Administración</h1>
-      <p class="suave">Feria Av. Argentina · Valparaíso</p>
+      <p class="suave">Feria App</p>
       ${p.paso === 'telefono' ? `
         <input id="tel" class="ancho" placeholder="+56 9 1234 5678" value="${esc(p.telefono)}"
                autocomplete="tel" inputmode="tel">
@@ -144,6 +149,8 @@ function vistaIngreso() {
                autocomplete="one-time-code" value="${esc(p.codigo ?? '')}">
         <p class="suave">Enviado a ${esc(p.telefono)}. Vence en 5 minutos.</p>
         ${p.pista ? `<div class="aviso">Código de prueba: ${esc(p.pista)}</div>` : ''}
+        ${p.pideClave ? `<input id="clave" class="ancho" type="password" placeholder="Tu clave de operador"
+               autocomplete="current-password">` : ''}
         <button class="accion" id="entrar" ${p.ocupado ? 'disabled' : ''}>
           ${p.ocupado ? 'ENTRANDO…' : 'ENTRAR'}
         </button>
@@ -174,12 +181,16 @@ function conectarIngreso() {
     // nuevo, vacío, y el servidor contesta «código incorrecto»
     // sobre algo que nunca se le mandó.
     const codigo = $('cod').value.trim();
+    // La clave no se guarda en ninguna variable que dure: se lee,
+    // se manda y se pierde al repintar.
+    const clave = $('clave')?.value ?? '';
     ingreso.codigo = codigo;
     ingreso.ocupado = true; pintar();
     try {
       const r = await api('POST', '/auth/sesion', {
         telefono: ingreso.telefono,
         codigo,
+        clave: clave || undefined,
         dispositivo: 'Panel web',
       }, { sinSesion: true });
       if (r.rol !== 'operador') throw new Error('Este panel es solo para la operación.');
@@ -189,6 +200,14 @@ function conectarIngreso() {
       await arrancar();
     } catch (e) {
       ingreso.ocupado = false;
+      if (e.pideClave) {
+        // El código estaba bien; falta la otra mitad.
+        if (ingreso.pideClave) avisar(e.message);
+        ingreso.pideClave = true;
+        pintar();
+        $('clave')?.focus();
+        return;
+      }
       avisar(e.message);
       pintar();
       $('cod')?.focus();
@@ -200,6 +219,7 @@ function conectarIngreso() {
   });
   $('tel')?.addEventListener('keydown', (e) => e.key === 'Enter' && $('pedir').click());
   $('cod')?.addEventListener('keydown', (e) => e.key === 'Enter' && $('entrar').click());
+  $('clave')?.addEventListener('keydown', (e) => e.key === 'Enter' && $('entrar').click());
 }
 
 // ============================================================
@@ -213,6 +233,7 @@ const SECCIONES = [
   ['liquidaciones', 'A pagar'],
   ['reembolsos', 'Reembolsos'],
   ['gente', 'Gente'],
+  ['ferias', 'Ferias'],
 ];
 
 async function cargar() {
@@ -229,7 +250,7 @@ async function cargar() {
     if (seccion === 'reembolsos') {
       datos.reembolsos = (await api('GET', '/operador/reembolsos-pendientes')).pendientes;
     }
-    if (seccion === 'gente') datos.gente = await api('GET', '/operador/gente');
+    if (seccion === 'gente' || seccion === 'ferias') datos.gente = await api('GET', '/operador/gente');
   } catch (e) {
     avisar(e.message);
   }
@@ -379,7 +400,12 @@ function vistaDetalle() {
       <div>
         <div class="fila"><h1>Pedido #${p.numero}</h1>${chip(p.estado)}</div>
         <p class="suave">${esc(p.cliente_nombre)} · ${esc(p.cliente_telefono)}<br>
-           ${esc(p.direccion)}</p>
+           ${esc(p.direccion)}<br>
+           <a href="https://www.google.com/maps/search/?api=1&query=${Number(p.lat)},${Number(p.lng)}"
+              target="_blank" rel="noopener">Ver el punto en el mapa</a>
+           · ${/^marcado/.test(p.geo_precision ?? '')
+                ? `<strong>${esc(p.geo_precision)}</strong>`
+                : `aproximado (${esc(p.geo_precision ?? 'sin dato')})`}</p>
       </div>
 
       <div class="tarjeta">
@@ -656,7 +682,7 @@ function vistaGente() {
       ${solicitudes === 1 ? 'Hay 1 persona que pidió' : `Hay ${solicitudes} personas que pidieron`}
       entrar desde la app. Están primero en cada lista: apruébalas solo si las conoces.
     </div>` : ''}
-    ${f ? formularioGente(f, g.rubros) : ''}
+    ${f ? formularioGente(f, g.rubros, g.ferias) : ''}
     <div class="pila">
       <div class="tarjeta" style="padding:0;overflow:hidden">
         <div class="fila" style="justify-content:space-between;padding:14px 18px">
@@ -670,14 +696,14 @@ function vistaGente() {
           No hay ni un puesto conectado: todo lo que entre te va a tocar a ti.
         </div>` : ''}
         <table>
-          <thead><tr><th>Nombre</th><th>Puesto</th><th>Rubros</th>
+          <thead><tr><th>Nombre</th><th>Feria y puesto</th><th>Rubros</th>
                      <th class="num">En curso</th><th>Estado</th><th></th></tr></thead>
           <tbody>
             ${g.feriantes.map((x) => `
               <tr style="${x.activo || x.pendiente ? '' : 'opacity:.5'}">
                 <td><strong>${esc(x.nombre)}</strong><br>
                     <span class="suave">${esc(x.telefono)}</span></td>
-                <td class="suave">${esc(x.puesto)}</td>
+                <td class="suave">${esc((x.feria ?? x.feria_id).replace(/^Feria /, ''))}<br>${esc(x.puesto)}</td>
                 <td class="suave">${esc(x.rubros)}</td>
                 <td class="num">${x.en_curso}</td>
                 <td>${x.pendiente ? '<span class="chip aviso">pidió entrar</span>'
@@ -730,7 +756,7 @@ const botonesPersona = (tipo, x) => x.activo ? `
   <button class="accion secundario" data-alta="${esc(x.id)}" data-tipo="${tipo}">Reactivar</button>`;
 
 /** El mismo formulario para agregar y para corregir. */
-function formularioGente(f, rubros) {
+function formularioGente(f, rubros, ferias) {
   const esFeriante = f.tipo === 'feriante';
   return `
     <div class="tarjeta" style="margin-bottom:18px">
@@ -747,6 +773,13 @@ function formularioGente(f, rubros) {
                placeholder="+56 9 1234 5678" inputmode="tel"></label>
       </div>
       ${esFeriante ? `
+        <div class="fila" style="margin-top:12px">
+          <label>Feria<select id="g-feria">
+            ${ferias.map((x) => `<option value="${esc(x.id)}"
+              ${(f.feriaId ?? 'feria-av-argentina') === x.id ? 'selected' : ''}>
+              ${esc(x.nombre)} · ${esc(x.comuna)}</option>`).join('')}
+          </select></label>
+        </div>
         <div class="fila" style="margin-top:12px;flex-wrap:wrap">
           <span class="suave">Qué vende:</span>
           ${rubros.map((r) => `
@@ -762,6 +795,73 @@ function formularioGente(f, rubros) {
           encienda el interruptor en su app.</span>
       </div>
     </div>`;
+}
+
+// ---------- Ferias ----------
+
+const DIAS_CORTOS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+function vistaFerias() {
+  const ferias = datos.gente?.ferias;
+  if (!ferias) return '';
+  return `
+    <h1 style="margin-bottom:18px">Ferias</h1>
+    <p class="suave" style="margin-top:-10px;margin-bottom:18px">
+      Las que están «repartiendo» reciben pedidos; las demás el cliente las ve como
+      «próximamente». Para abrir una, primero cárgale feriantes en Gente. Días y horarios
+      vienen del localizador de ferias de ODEPA: confírmalos con cada feria.
+    </p>
+    <div class="tarjeta" style="padding:0;overflow:hidden">
+      <div class="tabla"><table>
+        <thead><tr><th>Feria</th><th>Días</th><th>Abre</th><th>Último pedido</th><th>Cierra</th>
+                   <th class="num">Feriantes</th><th>Repartiendo</th><th></th></tr></thead>
+        <tbody>
+          ${ferias.map((f) => `
+            <tr data-fila-feria="${esc(f.id)}">
+              <td><strong>${esc(f.nombre)}</strong><br>
+                  <span class="suave">${esc(f.comuna)} · ${esc(f.calle)}</span></td>
+              <td>${DIAS_CORTOS.map((d, i) => `
+                <label style="display:inline-flex;gap:3px;align-items:center;margin-right:6px">
+                  <input type="checkbox" data-dia="${i}" ${f.horario.dias.includes(i) ? 'checked' : ''}>${d}
+                </label>`).join('')}</td>
+              <td><input type="time" data-hora="abre" value="${esc(f.horario.abre)}"></td>
+              <td><input type="time" data-hora="ultimoPedido" value="${esc(f.horario.ultimoPedido)}"></td>
+              <td><input type="time" data-hora="cierra" value="${esc(f.horario.cierra)}"></td>
+              <td class="num">${f.feriantes}</td>
+              <td><input type="checkbox" data-feria-activa="${esc(f.id)}" ${f.activa ? 'checked' : ''}></td>
+              <td class="num"><button class="accion secundario" data-guardar-feria="${esc(f.id)}">
+                Guardar horario</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>`;
+}
+
+/**
+ * La clave del operador.
+ *
+ * Con ella, para entrar al panel hacen falta dos cosas: el código
+ * que llega al teléfono y esta clave. Quien te robe el teléfono o
+ * alcance a ver un SMS no entra.
+ */
+function vistaClave() {
+  return `
+    <div class="telon" id="telon"><div class="panel-lateral" id="lateral">
+      <button class="cerrar" id="cerrar" aria-label="Cerrar">×</button>
+      <h1>${yo?.conClave ? 'Cambiar tu clave' : 'Ponle clave a tu cuenta'}</h1>
+      <p class="suave">Se te va a pedir además del código del SMS, acá y en la app.
+         Mínimo 10 caracteres. Anótala en un lugar seguro: si la olvidas, hay que
+         borrarla a mano en el servidor.</p>
+      <div class="tarjeta pila">
+        ${yo?.conClave ? `<label>Clave actual
+          <input id="k-actual" class="ancho" type="password" autocomplete="current-password"></label>` : ''}
+        <label>Clave nueva
+          <input id="k-nueva" class="ancho" type="password" autocomplete="new-password"></label>
+        <label>Repite la clave nueva
+          <input id="k-repite" class="ancho" type="password" autocomplete="new-password"></label>
+        <button class="accion" id="k-guardar">Guardar clave</button>
+      </div>
+    </div></div>`;
 }
 
 /**
@@ -815,6 +915,7 @@ function pintar() {
       : seccion === 'catalogo' ? vistaCatalogo()
       : seccion === 'liquidaciones' ? vistaLiquidaciones()
       : seccion === 'reembolsos' ? vistaReembolsos()
+      : seccion === 'ferias' ? vistaFerias()
       : vistaGente();
 
   raiz.innerHTML = `
@@ -823,6 +924,9 @@ function pintar() {
       <span class="crece"></span>
       <span class="quien">${esc(yo?.perfil?.nombre ?? '')}<br>
         <span class="suave">Operación</span></span>
+      <button class="accion secundario" id="mi-clave"
+              title="Una clave que se pide además del código del SMS">
+        ${yo?.conClave ? 'Cambiar clave' : '⚠ Poner clave'}</button>
       <button class="accion secundario" id="salir">Salir</button>
       <button class="accion secundario" id="salir-todos"
               title="Cierra la sesión en todos los teléfonos y navegadores">Salir de todos</button>
@@ -834,7 +938,8 @@ function pintar() {
         </button>`).join('')}
     </nav>
     <main>${cuerpo}</main>
-    ${detalle?.pedido ? vistaDetalle()
+    ${detalle?.clave ? vistaClave()
+      : detalle?.pedido ? vistaDetalle()
       : detalle?.historial ? vistaHistorial()
       : detalle?.codigo ? vistaCodigo()
       : ''}`;
@@ -857,6 +962,22 @@ function conectar() {
     seccion = e.currentTarget.dataset.seccion;
     detalle = null;
     void cargar();
+  });
+
+  // ---- Clave del operador ----
+  document.getElementById('mi-clave')?.addEventListener('click', () => {
+    detalle = { clave: true }; pintar();
+  });
+  document.getElementById('k-guardar')?.addEventListener('click', async () => {
+    const v = (id) => document.getElementById(id)?.value ?? '';
+    if (v('k-nueva') !== v('k-repite')) return avisar('Las dos claves nuevas no coinciden.');
+    try {
+      await api('POST', '/operador/clave', { actual: v('k-actual') || undefined, nueva: v('k-nueva') });
+      yo.conClave = true;
+      detalle = null;
+      pintar();
+      avisar('Clave guardada. Tus otras sesiones se cerraron.', 'exito');
+    } catch (e) { avisar(e.message); }
   });
 
   // ---- Telón ----
@@ -951,7 +1072,7 @@ function conectar() {
     const lista = tipo === 'feriante' ? datos.gente.feriantes : datos.gente.repartidores;
     const x = lista.find((p) => p.id === id);
     datos.formGente = { tipo, id, nombre: x.nombre, puesto: x.puesto, vehiculo: x.vehiculo,
-                        telefono: x.telefono, rubros: x.rubro_ids ?? [] };
+                        telefono: x.telefono, rubros: x.rubro_ids ?? [], feriaId: x.feria_id };
     pintar();
     window.scrollTo({ top: 0 });
   });
@@ -963,6 +1084,7 @@ function conectar() {
     const v = (id) => document.getElementById(id)?.value.trim();
     const cuerpo = f.tipo === 'feriante'
       ? { nombre: v('g-nombre'), puesto: v('g-puesto'), telefono: v('g-telefono'),
+          feriaId: v('g-feria'),
           rubros: [...document.querySelectorAll('[data-rubro]:checked')]
             .map((el) => el.dataset.rubro) }
       : { nombre: v('g-nombre'), vehiculo: v('g-vehiculo'), telefono: v('g-telefono') };
@@ -989,6 +1111,29 @@ function conectar() {
     const { rechazar: id, tipo, nombre } = e.currentTarget.dataset;
     if (!confirm(`¿Rechazar la solicitud de ${nombre}? Sigue pudiendo comprar como cliente.`)) return;
     return accion(() => api('POST', rutaDe(tipo, id), { pendiente: false }), 'Solicitud rechazada.');
+  });
+
+  // ---- Ferias ----
+  en('[data-feria-activa]', 'change', async (e) => {
+    const casilla = e.target;
+    try {
+      await api('POST', `/operador/ferias/${casilla.dataset.feriaActiva}`, { activa: casilla.checked });
+      avisar(casilla.checked ? 'Feria abierta a pedidos.' : 'Feria cerrada a pedidos.', 'exito');
+    } catch (err) {
+      // El servidor dijo que no (sin feriantes, por ejemplo): la
+      // casilla vuelve a como estaba, para no mostrar algo falso.
+      casilla.checked = !casilla.checked;
+      avisar(err.message);
+    }
+  });
+  en('[data-guardar-feria]', 'click', (e) => {
+    const id = e.currentTarget.dataset.guardarFeria;
+    const fila = e.currentTarget.closest('tr');
+    const hora = (campo) => fila.querySelector(`[data-hora="${campo}"]`).value;
+    return accion(() => api('POST', `/operador/ferias/${id}`, {
+      dias: [...fila.querySelectorAll('[data-dia]:checked')].map((el) => Number(el.dataset.dia)),
+      abre: hora('abre'), ultimoPedido: hora('ultimoPedido'), cierra: hora('cierra'),
+    }), 'Horario guardado.');
   });
 
   // ---- Reembolsos ----
@@ -1119,7 +1264,7 @@ void arrancar();
  */
 setInterval(() => {
   if (!token || !yo || cargando || detalle || document.hidden) return;
-  if (seccion === 'catalogo' || datos.formGente) return;
+  if (seccion === 'catalogo' || seccion === 'ferias' || datos.formGente) return;
   const foco = document.activeElement?.tagName;
   if (foco === 'INPUT' || foco === 'SELECT') return;
   void cargar();

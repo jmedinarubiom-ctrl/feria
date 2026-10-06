@@ -133,7 +133,7 @@ test('el pedido queda con el teléfono confirmado si no se deja otro de contacto
 test('lo que el cliente mande de más en el pedido se ignora', async () => {
   const token = await entrar(CLIENTA);
   const r = await pedir('POST', '/pedidos', {
-    ...PEDIDO, costoDespacho: -8000, feriaId: 'otra', total_venta: 1, estado: 'PAGADO',
+    ...PEDIDO, costoDespacho: -8000, total_venta: 1, estado: 'PAGADO',
     clienteId: 'otro',
   }, token);
   assert.equal(r.estado, 200, r.texto);
@@ -315,4 +315,110 @@ test('una solicitud rechazada no deja entrar como repartidor', async () => {
   const yo = await pedir('GET', '/auth/yo', undefined, await entrar(NUEVO));
   assert.equal(yo.json.rol, 'cliente');
   assert.equal(yo.json.solicitud.estado, 'cerrada');
+});
+
+// ------------------------------------------------------------
+// El perfil del cliente nuevo
+// ------------------------------------------------------------
+
+test('un cliente nuevo parte sin perfil, lo crea, y sus pedidos usan ese teléfono', async () => {
+  // Entra con correo: no hay número confirmado.
+  const c = await pedir('POST', '/auth/codigo', { correo: 'nueva@feria.test' });
+  const s = await pedir('POST', '/auth/sesion', { correo: 'nueva@feria.test', codigo: c.json.codigoDev });
+  const token = s.json.token;
+
+  const antes = (await pedir('GET', '/auth/yo', undefined, token)).json.perfil;
+  assert.equal(antes.nombre, '', 'recién registrada: sin nombre');
+  assert.equal(antes.telefono_contacto, null);
+
+  const guardado = await pedir('POST', '/cliente/perfil',
+    { nombre: 'Rosa Díaz', telefonoContacto: '+56 9 7777 1234' }, token);
+  assert.equal(guardado.estado, 200);
+  const yo = (await pedir('GET', '/auth/yo', undefined, token)).json.perfil;
+  assert.equal(yo.nombre, 'Rosa Díaz');
+  assert.equal(yo.telefono_contacto, '+56 9 7777 1234');
+
+  // Guardar otra cosa después no le borra el teléfono.
+  await pedir('POST', '/cliente/perfil', { nombre: 'Rosa Díaz', direccion: 'Calle 1' }, token);
+  assert.equal((await pedir('GET', '/auth/yo', undefined, token)).json.perfil.telefono_contacto,
+    '+56 9 7777 1234');
+
+  // Y el pedido sale con ese número aunque la app no lo mande.
+  const p = await pedir('POST', '/pedidos', { ...PEDIDO, clienteTelefono: '' }, token);
+  assert.equal(p.estado, 200, p.texto);
+  const visto = (await pedir('GET', `/pedidos/${p.json.pedidoId}`, undefined, token)).json;
+  assert.equal(visto.cliente_telefono, '+56 9 7777 1234');
+});
+
+// ------------------------------------------------------------
+// El punto exacto de entrega
+// ------------------------------------------------------------
+
+test('el punto que marca el cliente se guarda tal cual, con su margen', async () => {
+  const token = await entrar(CLIENTA);
+  const r = await pedir('POST', '/pedidos', {
+    ...PEDIDO, puntoMarcado: true, lat: -33.047238, lng: -71.612688, precisionM: 7.6,
+  }, token);
+  assert.equal(r.estado, 200, r.texto);
+
+  const p = (await pedir('GET', `/pedidos/${r.json.pedidoId}`, undefined, token)).json;
+  assert.equal(p.lat, -33.047238);
+  assert.equal(p.lng, -71.612688);
+  assert.equal(p.geo_precision, 'marcado por el cliente (±8 m)');
+});
+
+test('ajustado a mano en el mapa no lleva margen de GPS', async () => {
+  const token = await entrar(CLIENTA);
+  const r = await pedir('POST', '/pedidos',
+    { ...PEDIDO, puntoMarcado: true, lat: -33.0301, lng: -71.5512 }, token);
+  const p = (await pedir('GET', `/pedidos/${r.json.pedidoId}`, undefined, token)).json;
+  assert.equal(p.geo_precision, 'marcado por el cliente');
+});
+
+test('un punto marcado fuera de la región se rechaza en vez de mandar al repartidor ahí', async () => {
+  const token = await entrar(CLIENTA);
+  const casos: Array<[string, number, number]> = [
+    ['el GPS sin señal', 0, 0], ['Santiago', -33.45, -70.66], ['sin número', NaN, NaN],
+    ['Buenos Aires', -34.6, -58.4],
+  ];
+  for (const [que, lat, lng] of casos) {
+    const r = await pedir('POST', '/pedidos', { ...PEDIDO, puntoMarcado: true, lat, lng }, token);
+    assert.equal(r.estado, 422, que);
+  }
+});
+
+test('el repartidor ve si el punto es exacto o aproximado', async () => {
+  const token = await entrar(CLIENTA);
+  const r = await pedir('POST', '/pedidos',
+    { ...PEDIDO, puntoMarcado: true, lat: -33.0472, lng: -71.6127, precisionM: 5 }, token);
+  const pago = await pedir('POST', '/pagos/iniciar', { pedidoId: r.json.pedidoId });
+  await pedir('POST', `/dev/pagar/${pago.json.pagoId}`);
+
+  const jose = await entrar('+56911111111');
+  const tablero = (await pedir('GET', '/feriante/tablero', undefined, jose)).json;
+  await pedir('POST', `/subpedidos/${tablero.ofertas[0].sub_pedido_id}/aceptar`, {}, jose);
+
+  const diego = await entrar('+56900000001');
+  const disp = (await pedir('GET', '/repartidor/tablero', undefined, diego)).json.disponibles;
+  await pedir('POST', `/viajes/${disp[0].id}/aceptar`, {}, diego);
+  const viaje = (await pedir('GET', '/repartidor/tablero', undefined, diego)).json.viajeActivo;
+
+  assert.equal(viaje.geo_precision, 'marcado por el cliente (±5 m)');
+  const entrega = viaje.paradas.find((x: any) => x.tipo === 'ENTREGA');
+  assert.equal(entrega.lat, -33.0472, 'la parada de entrega lleva al punto marcado');
+  assert.equal(entrega.lng, -71.6127);
+});
+
+test('el mapa para elegir el punto se abre en la comuna de la feria del cliente', async () => {
+  const token = await entrar(CLIENTA);
+  assert.equal((await pedir('GET', '/cliente/ubicar?direccion=Calle%201')).estado, 401);
+
+  // En los tests no se sale al buscador: cae al centro de la comuna.
+  const valpo = await pedir('GET', '/cliente/ubicar?direccion=Subida%20Ecuador%20123', undefined, token);
+  assert.deepEqual(valpo.json, { lat: -33.0472, lng: -71.6127, encontrada: false });
+
+  const vina = await pedir('GET',
+    '/cliente/ubicar?direccion=Calle%20Valpara%C3%ADso%20500&feria=feria-marga-marga', undefined, token);
+  assert.equal(vina.json.lat, -33.0245);
+  assert.equal(vina.json.encontrada, false);
 });

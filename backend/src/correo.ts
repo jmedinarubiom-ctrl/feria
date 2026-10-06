@@ -1,20 +1,33 @@
 /**
  * Envío de correos.
  *
- * Igual que `sms.ts`: en desarrollo escribe en la consola, en
- * producción sale por un proveedor. Se usa Resend por REST, sin
- * SDK: es una sola petición. Se elige por variables de entorno.
+ * Igual que `sms.ts`: sin nada configurado escribe en la consola,
+ * que sirve para desarrollar. Para que el correo llegue de verdad
+ * hay dos caminos, y se elige por variables de entorno:
+ *
+ *  - **SMTP** (`CORREO_SMTP_USUARIO` y `CORREO_SMTP_CLAVE`): manda
+ *    desde una casilla que ya existe. Con Gmail y una «contraseña
+ *    de aplicación» funciona sin dominio propio y sin pagar; Gmail
+ *    deja mandar unos 500 correos al día, que para partir sobra.
+ *  - **Resend** (`RESEND_API_KEY`): para cuando haya dominio propio
+ *    y más volumen.
+ *
+ * Si están los dos, gana SMTP.
  */
+
+import { paraElRegistro } from './sms.ts';
 
 export type ResultadoCorreo = { enviado: boolean; proveedor: string; detalle?: string };
 
 const hayResend = () => !!(process.env.RESEND_API_KEY && process.env.CORREO_REMITENTE);
+const haySmtp = () => !!(process.env.CORREO_SMTP_USUARIO && process.env.CORREO_SMTP_CLAVE);
 
-export const proveedorCorreo = (): string => (hayResend() ? 'resend' : 'consola');
+export const proveedorCorreo = (): string =>
+  haySmtp() ? 'smtp' : hayResend() ? 'resend' : 'consola';
 
-type Transporte = (a: string, asunto: string, texto: string) => Promise<ResultadoCorreo>;
+type Transporte = (a: string, asunto: string, texto: string, html?: string) => Promise<ResultadoCorreo>;
 
-const porResend: Transporte = async (a, asunto, texto) => {
+const porResend: Transporte = async (a, asunto, texto, html) => {
   const r = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -23,6 +36,7 @@ const porResend: Transporte = async (a, asunto, texto) => {
     },
     body: JSON.stringify({
       from: process.env.CORREO_REMITENTE, to: [a], subject: asunto, text: texto,
+      ...(html ? { html } : {}),
     }),
     signal: AbortSignal.timeout(10_000),
   });
@@ -35,22 +49,77 @@ const porResend: Transporte = async (a, asunto, texto) => {
   return { enviado: true, proveedor: 'resend' };
 };
 
+/**
+ * Por SMTP, con nodemailer. Los valores por defecto son los de
+ * Gmail; con otra casilla se cambian el servidor y el puerto.
+ */
+const porSmtp: Transporte = async (a, asunto, texto, html) => {
+  const { default: nodemailer } = await import('nodemailer');
+  const usuario = process.env.CORREO_SMTP_USUARIO!;
+  const puerto = Number(process.env.CORREO_SMTP_PUERTO ?? 465);
+  const cartero = nodemailer.createTransport({
+    host: process.env.CORREO_SMTP_SERVIDOR ?? 'smtp.gmail.com',
+    port: puerto,
+    // 465 cifra desde el primer byte; en los demás puertos se
+    // cifra apenas el servidor lo ofrece (STARTTLS).
+    secure: puerto === 465,
+    // Las contraseñas de aplicación de Google se muestran con
+    // espacios («abcd efgh ijkl mnop») y así se suelen pegar.
+    auth: { user: usuario, pass: process.env.CORREO_SMTP_CLAVE!.replace(/\s+/g, '') },
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000,
+  });
+  try {
+    await cartero.sendMail({
+      from: process.env.CORREO_REMITENTE || `Feria App <${usuario}>`,
+      to: a,
+      subject: asunto,
+      text: texto,
+      // Con las dos versiones —texto y HTML— el correo se parece a
+      // los que manda cualquier servicio serio. Uno de puro texto
+      // con un número suelto es justo como se ven los de spam.
+      ...(html ? { html } : {}),
+    });
+    return { enviado: true, proveedor: 'smtp' };
+  } catch (e: any) {
+    // El detalle queda en el registro, no viaja al cliente.
+    console.error('[correo] SMTP falló:', e?.code ?? '', e?.responseCode ?? '', e?.message ?? e);
+    return { enviado: false, proveedor: 'smtp', detalle: explicarSmtp(e) };
+  }
+};
+
+/** Lo que conviene revisar según cómo falló. Para `npm run probar-correo`. */
+function explicarSmtp(e: any): string {
+  if (e?.code === 'EAUTH' || e?.responseCode === 535) {
+    return 'El servidor rechazó el usuario o la clave. Con Gmail tiene que ser una '
+      + '«contraseña de aplicación», no la clave normal de la cuenta.';
+  }
+  if (['ECONNECTION', 'ETIMEDOUT', 'ESOCKET', 'EDNS', 'ENOTFOUND'].includes(e?.code)) {
+    return 'No se pudo conectar con el servidor de correo. Revisa el servidor, el puerto y la conexión.';
+  }
+  return e?.message ?? 'Error desconocido.';
+}
+
 let transporte: Transporte | null = null;
 /** Para los tests: ver qué se mandó sin salir a internet. */
 export const fijarTransporteCorreo = (t: Transporte | null): void => { transporte = t; };
 
-export async function enviarCorreo(a: string, asunto: string, texto: string): Promise<ResultadoCorreo> {
-  if (transporte) return transporte(a, asunto, texto);
+export async function enviarCorreo(
+  a: string, asunto: string, texto: string, html?: string,
+): Promise<ResultadoCorreo> {
+  if (transporte) return transporte(a, asunto, texto, html);
+  if (haySmtp()) return porSmtp(a, asunto, texto, html);
   if (hayResend()) {
     try {
-      return await porResend(a, asunto, texto);
+      return await porResend(a, asunto, texto, html);
     } catch (e) {
       console.error('[correo] no se pudo enviar:', (e as Error).message);
       return { enviado: false, proveedor: 'resend', detalle: 'sin respuesta' };
     }
   }
-  console.log(`\n  ┌─ Correo a ${a} · ${asunto}`);
-  console.log(`  │  ${texto}`);
+  console.log(`\n  ┌─ Correo a ${a} · ${paraElRegistro(asunto)}`);
+  console.log(`  │  ${paraElRegistro(texto)}`);
   console.log(`  └─ (sin proveedor de correo configurado: no se envió de verdad)\n`);
   return { enviado: true, proveedor: 'consola' };
 }

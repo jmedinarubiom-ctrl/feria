@@ -15,10 +15,20 @@ import Constants from 'expo-constants';
  * computador. En un iPhone la app no llegaba a ningún lado y el
  * botón de «enviar código» no hacía nada.
  */
+/**
+ * `EXPO_PUBLIC_FERIA_API` puede traer varias direcciones separadas
+ * por coma. Un APK de prueba apunta al Mac, y el Mac cambia de IP
+ * según la red en que esté: con la lista, la app prueba cuál
+ * responde (`buscarServidor`) en vez de quedar apuntando a la red
+ * de ayer.
+ */
+const DIRECCIONES_FIJAS: string[] = String(process.env.EXPO_PUBLIC_FERIA_API ?? '')
+  .split(',').map((d: string) => d.trim()).filter(Boolean);
+
 function detectarHost(): string {
   // En producción el servidor tiene dominio propio y nada de esto
   // aplica. `EXPO_PUBLIC_` es el prefijo que Expo inyecta al bundle.
-  const fijo = process.env.EXPO_PUBLIC_FERIA_API;
+  const fijo = DIRECCIONES_FIJAS[0];
   if (fijo) return fijo;
 
   // `hostUri` viene como «192.168.1.26:8082». También sirve
@@ -53,11 +63,47 @@ const armar = (h: string) => (h.startsWith('http') ? h : `http://${h}:4000`);
  */
 let base = armar(detectarHost());
 export const BASE_AUTO = base;
+// La automática vigente: cambia si `buscarServidor` encuentra otra.
+let auto = base;
 
 export const servidor = (): string => base;
 export const fijarServidor = (url: string | null): void => {
-  base = url ? armar(url.trim().replace(/\/$/, '')) : BASE_AUTO;
+  base = url ? armar(url.trim().replace(/\/$/, '')) : auto;
 };
+
+const responde = async (url: string): Promise<string> => {
+  const corte = new AbortController();
+  const reloj = setTimeout(() => corte.abort(), 3000);
+  try {
+    const r = await fetch(url + '/salud', { signal: corte.signal });
+    if (!r.ok) throw new Error('no responde');
+    return url;
+  } finally {
+    clearTimeout(reloj);
+  }
+};
+
+/**
+ * Si hay varias direcciones posibles, deja puesta la primera que
+ * responda. No toca nada si hay una sola o si ninguna contesta.
+ */
+export async function buscarServidor(): Promise<void> {
+  if (DIRECCIONES_FIJAS.length < 2) return;
+  try {
+    auto = await Promise.any(DIRECCIONES_FIJAS.map((d) => responde(armar(d))));
+    base = auto;
+  } catch {
+    // Ninguna respondió: queda la primera y la pantalla de ingreso
+    // deja escribir otra a mano.
+  }
+}
+
+/**
+ * El servidor corre como función (Supabase): no hay WebSocket, y
+ * cada intento de conexión es una llamada que cuenta en la cuota.
+ * La pantalla se pone al día preguntando cada pocos segundos.
+ */
+export const sinSocket = (): boolean => base.includes('/functions/v1/');
 
 // Se mantienen por compatibilidad con lo que ya las usa. `servidor()`
 // es la que refleja un cambio hecho a mano.
@@ -66,9 +112,19 @@ export const BASE = base;
 
 export class ErrorApi extends Error {
   estado: number;
-  constructor(mensaje: string, estado: number) {
+  /** El servidor pide la clave del operador para terminar de entrar. */
+  pideClave: boolean;
+  /**
+   * El servidor pide además el código que mandó al correo de la
+   * cuenta (vuelve después de meses). Trae el correo tapado.
+   */
+  pideCorreo: { correo: string; codigoDev?: string } | null;
+  constructor(mensaje: string, estado: number, cuerpo: any = {}) {
     super(mensaje);
     this.estado = estado;
+    this.pideClave = !!cuerpo.pideClave;
+    this.pideCorreo = cuerpo.pideCorreo
+      ? { correo: String(cuerpo.correo ?? ''), codigoDev: cuerpo.codigoDev } : null;
   }
 }
 
@@ -109,7 +165,7 @@ export async function api(
     tokenActual = null;
     alExpirar?.();
   }
-  if (!r.ok) throw new ErrorApi(cuerpo.error ?? `Error ${r.status}`, r.status);
+  if (!r.ok) throw new ErrorApi(cuerpo.error ?? `Error ${r.status}`, r.status, cuerpo);
   return cuerpo;
 }
 
@@ -121,8 +177,17 @@ export type Destino = { telefono: string } | { correo: string };
 export const pedirCodigo = (destino: Destino) =>
   api('POST', '/auth/codigo', { cuerpo: destino, sinSesion: true });
 
-export const canjearCodigo = (destino: Destino, codigo: string, dispositivo: string) =>
-  api('POST', '/auth/sesion', { cuerpo: { ...destino, codigo, dispositivo }, sinSesion: true });
+export const canjearCodigo = (
+  destino: Destino, codigo: string, dispositivo: string,
+  extra: { clave?: string; codigoCorreo?: string } = {},
+) => api('POST', '/auth/sesion', {
+  cuerpo: {
+    ...destino, codigo, dispositivo,
+    ...(extra.clave ? { clave: extra.clave } : {}),
+    ...(extra.codigoCorreo ? { codigoCorreo: extra.codigoCorreo } : {}),
+  },
+  sinSesion: true,
+});
 
 /**
  * Carga un endpoint y lo vuelve a pedir cuando el WebSocket avisa
@@ -156,16 +221,20 @@ export function useTablero(camino: string, rol: string, actorId: string) {
     let reintento: ReturnType<typeof setTimeout>;
 
     const conectar = () => {
-      if (!vivo) return;
+      if (!vivo || sinSocket()) return;
       const wsBase = servidor().replace(/^http/, 'ws') + '/ws';
       // El servidor ya no le cree a la URL quién es uno: feriante,
       // repartidor y operador se identifican con el token de su
       // sesión. El cliente no tiene sesión; su llave es el id de su
       // pedido.
-      const sesion = rol !== 'cliente' && tokenActual
-        ? `&token=${encodeURIComponent(tokenActual)}` : '';
-      ws = new WebSocket(`${wsBase}?rol=${rol}&id=${encodeURIComponent(actorId)}${sesion}`);
-      ws.onopen = () => { enVivoRef.current = true; setEnVivo(true); void recargar(); };
+      // El token va en el primer mensaje y no en la dirección: las
+      // direcciones quedan escritas en los registros de los
+      // servidores del camino.
+      ws = new WebSocket(`${wsBase}?rol=${rol}&id=${encodeURIComponent(actorId)}`);
+      ws.onopen = () => {
+        if (rol !== 'cliente' && tokenActual) ws?.send(JSON.stringify({ token: tokenActual }));
+        enVivoRef.current = true; setEnVivo(true); void recargar();
+      };
       ws.onmessage = () => { void recargar(); };
       ws.onerror = () => {};
       ws.onclose = () => {
@@ -181,7 +250,8 @@ export function useTablero(camino: string, rol: string, actorId: string) {
 
     // Red de seguridad por si el socket queda colgado sin cerrarse:
     // las ofertas vencen por tiempo y la pantalla tiene que enterarse.
-    const encuesta = setInterval(() => { if (!enVivoRef.current) void recargar(); }, 5000);
+    const encuesta = setInterval(
+      () => { if (!enVivoRef.current) void recargar(); }, sinSocket() ? 8000 : 5000);
 
     return () => {
       vivo = false;

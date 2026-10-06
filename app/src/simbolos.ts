@@ -25,6 +25,13 @@ const PRODUCTOS: Record<string, string> = {
   'p-choritos': '🦪',
   'p-huevos': '🥚',
   'p-aceitunas': '🫒',
+  'p-choclo': '🌽', 'p-pimenton': '🫑', 'p-ajo': '🧄', 'p-cilantro': '🌿', 'p-perejil': '🌿',
+  'p-apio': '🥬', 'p-betarraga': '🍠', 'p-repollo': '🥬', 'p-brocoli': '🥦', 'p-acelga': '🥬',
+  'p-zapallo-italiano': '🥒', 'p-pepino': '🥒', 'p-poroto-verde': '🫛',
+  'p-limon': '🍋', 'p-pera': '🍐', 'p-uva': '🍇', 'p-kiwi': '🥝', 'p-mandarina': '🍊',
+  'p-salmon': '🐟', 'p-jurel': '🐟',
+  'p-queso-fresco': '🧀', 'p-queso-mantecoso': '🧀', 'p-queso-cabra': '🧀', 'p-quesillo': '🧀',
+  'p-porotos': '🫘', 'p-lentejas': '🫘', 'p-nueces': '🌰', 'p-miel': '🍯', 'p-mote': '🌾',
 };
 
 const RUBROS: Record<string, string> = {
@@ -32,6 +39,7 @@ const RUBROS: Record<string, string> = {
   frutas: '🍎',
   pescado: '🐟',
   abarrotes: '🥚',
+  quesos: '🧀',
 };
 
 /**
