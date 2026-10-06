@@ -3,7 +3,7 @@ import {
 } from 'node:crypto';
 import { ahora, consultar, consultarUno, ejecutar, enTransaccion, id, registrarEvento, type Fila } from '../db/index.ts';
 import { enviarSms, proveedorSms } from '../sms.ts';
-import { enviarCorreo, proveedorCorreo } from '../correo.ts';
+import { enviarCorreo, proveedorCorreo, plantillaCorreo } from '../correo.ts';
 import { CONFIG } from '../config.ts';
 
 export class ErrorAuth extends Error {
@@ -570,17 +570,12 @@ export async function pedirCodigoPorCorreo(
 
 /** La versión con formato del correo del código. */
 function correoDeCodigo(codigo: string, minutos: number): string {
-  return `<!doctype html>
-<html lang="es"><body style="margin:0;background:#FAFBFC;font-family:Arial,Helvetica,sans-serif;color:#1F2933">
-<div style="max-width:440px;margin:0 auto;padding:32px 24px">
-  <p style="font-size:18px;font-weight:bold;margin:0 0 16px">Feria App</p>
-  <p style="font-size:15px;line-height:1.5;margin:0 0 20px">Hola, este es tu código para entrar a la app:</p>
-  <p style="font-size:34px;font-weight:bold;letter-spacing:6px;margin:0 0 20px;padding:16px;
-            background:#FFFFFF;border:1px solid #E4E7EB;border-radius:12px;text-align:center">${codigo}</p>
-  <p style="font-size:15px;line-height:1.5;margin:0 0 20px">Escríbelo en la app. Vence en ${minutos} minutos.</p>
-  <p style="font-size:13px;line-height:1.5;color:#52606D;margin:0">Si no lo pediste tú, no hagas nada:
-     sin el código nadie puede entrar a tu cuenta.</p>
-</div></body></html>`;
+  return plantillaCorreo(`    <p style="font-size:15px;line-height:1.5;margin:0 0 16px">Hola, este es tu código para entrar a la app:</p>
+    <p style="font-size:34px;font-weight:bold;letter-spacing:6px;margin:0 0 16px;padding:16px;
+              background:#F4F6F4;border-radius:12px;text-align:center;color:#16211D">${codigo}</p>
+    <p style="font-size:15px;line-height:1.5;margin:0 0 16px">Escríbelo en la app. Vence en ${minutos} minutos.</p>
+    <p style="font-size:13px;line-height:1.5;color:#6B7670;margin:0">Si no lo pediste tú, no hagas nada:
+       sin el código nadie puede entrar a tu cuenta.</p>`);
 }
 
 export async function crearSesionPorCorreo(

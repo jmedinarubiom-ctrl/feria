@@ -1,6 +1,6 @@
 import { consultar, consultarUno, ejecutar, type Fila } from '../db/index.ts';
 import { bus } from '../realtime/bus.ts';
-import { enviarCorreo } from '../correo.ts';
+import { enviarCorreo, plantillaCorreo } from '../correo.ts';
 import { CONFIG } from '../config.ts';
 
 /**
@@ -53,18 +53,16 @@ export async function enviarComprobante(pedidoId: string): Promise<boolean> {
     'Este correo es un respaldo de tu pedido, no una boleta.',
   ].join('\n');
 
-  const html = `<!doctype html><html lang="es"><body style="font-family:system-ui,Arial,sans-serif;color:#1F2933;max-width:520px;margin:0 auto;padding:16px">
-<h2 style="margin:0 0 4px">Pedido #${pedido.numero}</h2>
-<p style="color:#52606D;margin:0 0 16px">Hola ${limpio(pedido.cliente_nombre)}, recibimos tu pago.</p>
-<table style="width:100%;border-collapse:collapse">
-${items.map((i) => `<tr><td style="padding:6px 0;border-bottom:1px solid #E4E7EB">${i.cantidad} × ${limpio(i.nombre)} <span style="color:#7B8794">(${limpio(i.formato)})</span></td><td style="padding:6px 0;border-bottom:1px solid #E4E7EB;text-align:right">${plata(i.cantidad * i.precio_venta)}</td></tr>`).join('\n')}
-<tr><td style="padding:6px 0">Despacho</td><td style="text-align:right">${plata(pedido.costo_despacho)}</td></tr>
-<tr><td style="padding:6px 0"><b>Total pagado</b></td><td style="text-align:right"><b>${plata(pedido.total_venta)}</b></td></tr>
-</table>
-<p><b>Se entrega en:</b> ${limpio(pedido.direccion)}</p>
-<p style="color:#52606D;font-size:13px">Los productos de feria se venden por formato aproximado: el peso exacto puede variar un poco. Si necesitas cambiar algo, llámanos al ${limpio(CONFIG.telefonoContacto)}.</p>
-<p style="color:#7B8794;font-size:12px">Este correo es un respaldo de tu pedido, no una boleta.</p>
-</body></html>`;
+  const html = plantillaCorreo(`    <h2 style="margin:0 0 4px;font-size:20px">Pedido #${pedido.numero}</h2>
+    <p style="color:#6B7670;margin:0 0 16px;font-size:15px">Hola ${limpio(pedido.cliente_nombre)}, recibimos tu pago.</p>
+    <table style="width:100%;border-collapse:collapse;font-size:15px">
+${items.map((i) => `<tr><td style="padding:8px 0;border-bottom:1px solid #EDEFED">${i.cantidad} × ${limpio(i.nombre)} <span style="color:#6B7670">(${limpio(i.formato)})</span></td><td style="padding:8px 0;border-bottom:1px solid #EDEFED;text-align:right;white-space:nowrap">${plata(i.cantidad * i.precio_venta)}</td></tr>`).join('\n')}
+    <tr><td style="padding:8px 0;color:#6B7670">Despacho</td><td style="text-align:right;color:#6B7670">${plata(pedido.costo_despacho)}</td></tr>
+    <tr><td style="padding:10px 0 0;font-size:17px"><b>Total pagado</b></td><td style="padding:10px 0 0;text-align:right;font-size:17px;color:#146C54"><b>${plata(pedido.total_venta)}</b></td></tr>
+    </table>
+    <p style="margin:20px 0 0;padding:12px 14px;background:#F4F6F4;border-radius:12px;font-size:14px;line-height:1.5"><b>Se entrega en:</b><br>${limpio(pedido.direccion)}</p>
+    <p style="color:#6B7670;font-size:13px;line-height:1.5;margin:16px 0 0">Los productos de feria se venden por formato aproximado: el peso exacto puede variar un poco. Si necesitas cambiar algo, llámanos al ${limpio(CONFIG.telefonoContacto)}.</p>`,
+    'Este correo es un respaldo de tu pedido, no una boleta.');
 
   const r = await enviarCorreo(destino, `Feria App: tu pedido #${pedido.numero}`, texto, html);
   if (!r.enviado) {

@@ -7,8 +7,10 @@ import { C, E, R, T, clp } from '../tema';
 import { Cargando, NoCargo } from '../ui';
 import { useRecurso } from './cargar';
 import { useCliente } from './estado';
-import { useRellenoPestanas } from './piezas';
-import { simboloProducto, simboloRubro } from '../simbolos';
+import { MasRedondo, useRellenoPestanas } from './piezas';
+import { Foto } from '../producto';
+import { simboloProducto } from '../simbolos';
+import { Icono, iconoDeRubro } from '../iconos';
 
 /**
  * Inicio del cliente: saludo, buscador, rubros y el estado de la feria.
@@ -18,12 +20,14 @@ import { simboloProducto, simboloRubro } from '../simbolos';
  * puesto —de eso se encarga el broadcast—, así que ese bloque pasó a
  * mostrar la feria y si está tomando pedidos.
  */
+const BASICOS = ['p-tomate', 'p-papa', 'p-cebolla', 'p-palta', 'p-limon', 'p-platano', 'p-huevos', 'p-lechuga'];
+
 export default function Inicio({ navegar }: { navegar: (p: string, args?: any) => void }) {
   const { datos: catalogo, error, recargar } = useRecurso<any[]>('/catalogo');
   const { feriaId } = useCliente();
   const { datos: feria } = useRecurso<any>(`/feria/estado?feria=${encodeURIComponent(feriaId)}`);
   const [busqueda, setBusqueda] = useState('');
-  const { perfil, unidades } = useCliente();
+  const { perfil, unidades, agregar } = useCliente();
   const relleno = useRellenoPestanas();
 
   if (error) return <NoCargo error={error} onReintentar={recargar} />;
@@ -31,6 +35,11 @@ export default function Inicio({ navegar }: { navegar: (p: string, args?: any) =
 
   const productos = catalogo.flatMap((r: any) =>
     r.productos.map((p: any) => ({ ...p, rubro: r.nombre })));
+  // Lo que casi todo el mundo lleva de la feria, para partir el
+  // pedido sin entrar rubro por rubro.
+  const basicos = BASICOS
+    .map((id) => productos.find((p: any) => p.id === id))
+    .filter(Boolean);
   const encontrados = busqueda.trim()
     ? productos.filter((p: any) =>
         p.nombre.toLowerCase().includes(busqueda.trim().toLowerCase()))
@@ -52,7 +61,7 @@ export default function Inicio({ navegar }: { navegar: (p: string, args?: any) =
         {/* El carro se llega también desde acá: la pestaña de abajo
             lleva el número, pero el gesto natural es el de arriba. */}
         <Pressable onPress={() => navegar('Carrito')} style={e.avatar} hitSlop={6}>
-          <Text style={{ fontSize: 18 }}>🧺</Text>
+          <Icono nombre="canasto" tamano={20} color={C.verdeOscuro} />
           {unidades > 0 ? (
             <View style={e.globo}><Text style={e.globoTexto}>{unidades}</Text></View>
           ) : null}
@@ -65,7 +74,7 @@ export default function Inicio({ navegar }: { navegar: (p: string, args?: any) =
       </View>
 
       <View style={e.buscador}>
-        <Text style={e.lupa}>⌕</Text>
+        <Icono nombre="buscar" tamano={18} color={C.textoSuave} />
         <TextInput
           style={e.campoBusqueda}
           value={busqueda}
@@ -107,22 +116,52 @@ export default function Inicio({ navegar }: { navegar: (p: string, args?: any) =
       </View>
 
       <Text style={[T.seccion, { marginBottom: E.m }]}>Rubros</Text>
-      <View style={e.grilla}>
+      <ScrollView
+        horizontal showsHorizontalScrollIndicator={false}
+        style={e.carril} contentContainerStyle={e.grilla}
+      >
         {catalogo.map((r: any) => (
           <Pressable
             key={r.id}
             onPress={() => navegar('Categoria', { rubroId: r.id, nombre: r.nombre })}
             style={({ pressed }) => [e.rubro, pressed && { opacity: 0.7 }]}
           >
-            <View style={e.rubroIcono}>
-              <Text style={{ fontSize: 22 }}>{simboloRubro(r.id, r.nombre) ?? '🧺'}</Text>
+            <View style={[e.rubroIcono, { backgroundColor: iconoDeRubro(r.id).fondo }]}>
+              <Icono nombre={iconoDeRubro(r.id).icono} tamano={24} color={iconoDeRubro(r.id).color} />
             </View>
             <Text style={[T.micro, { color: C.texto, textAlign: 'center' }]} numberOfLines={2}>
               {r.nombre}
             </Text>
           </Pressable>
         ))}
-      </View>
+      </ScrollView>
+
+      {basicos.length ? (
+        <>
+          <Text style={[T.seccion, { marginBottom: E.m }]}>Lo de siempre</Text>
+          <ScrollView
+            horizontal showsHorizontalScrollIndicator={false}
+            style={e.carril} contentContainerStyle={e.grilla}
+          >
+            {basicos.map((p: any) => (
+              <Pressable
+                key={p.id}
+                onPress={() => navegar('Producto', { producto: p })}
+                style={({ pressed }) => [e.basico, pressed && { opacity: 0.85 }]}
+              >
+                <Foto url={p.imagen_url} productoId={p.id} alto={92} radio={R.chico}
+                      simbolo={simboloProducto(p)} />
+                <Text style={[T.cuerpo, { marginTop: E.s }]} numberOfLines={1}>{p.nombre}</Text>
+                <Text style={T.micro} numberOfLines={1}>{p.formato}</Text>
+                <View style={e.basicoPie}>
+                  <Text style={[T.cifraChica, { color: C.verde }]}>{clp(p.precio_venta)}</Text>
+                  <MasRedondo onPress={() => agregar(p.id)} />
+                </View>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </>
+      ) : null}
 
       <Text style={[T.seccion, { marginBottom: E.m }]}>Tu feria</Text>
       <Pressable onPress={() => navegar('Feria')} style={e.tarjetaFeria}>
@@ -144,7 +183,7 @@ export default function Inicio({ navegar }: { navegar: (p: string, args?: any) =
               : '…'}
           </Text>
         </View>
-        <Text style={e.flecha}>›</Text>
+        <Icono nombre="adelante" tamano={20} color={C.textoSuave} />
       </Pressable>
     </ScrollView>
   );
@@ -199,18 +238,28 @@ const e = StyleSheet.create({
     width: 150, height: 150, opacity: 0.18,
   },
 
-  grilla: { flexDirection: 'row', flexWrap: 'wrap', gap: E.m, marginBottom: E.xl },
+  // Un carril que se desliza: cinco rubros en una grilla dejaban el
+  // último solo en su fila, del doble de ancho que los demás.
+  carril: { marginHorizontal: -E.l, marginBottom: E.xl, flexGrow: 0 },
+  grilla: { flexDirection: 'row', gap: E.m, paddingHorizontal: E.l },
   rubro: {
-    flexGrow: 1, flexBasis: '21%', alignItems: 'center', gap: E.s,
-    paddingVertical: E.m,
+    width: 96, alignItems: 'center', gap: E.s,
+    paddingVertical: E.m, paddingHorizontal: E.xs,
     backgroundColor: C.superficie, borderRadius: R.medio,
     borderWidth: 1, borderColor: C.borde, userSelect: 'none',
   },
   rubroIcono: {
-    width: 44, height: 44, borderRadius: 22, backgroundColor: C.verdeSuave,
+    width: 48, height: 48, borderRadius: 24, backgroundColor: C.verdeSuave,
     alignItems: 'center', justifyContent: 'center',
   },
 
+  basico: {
+    width: 148, padding: E.s, backgroundColor: C.superficie, borderRadius: R.medio,
+    borderWidth: 1, borderColor: C.borde,
+  },
+  basicoPie: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: E.xs,
+  },
   tarjetaFeria: {
     flexDirection: 'row', alignItems: 'center', gap: E.m,
     backgroundColor: C.superficie, borderRadius: R.grande,

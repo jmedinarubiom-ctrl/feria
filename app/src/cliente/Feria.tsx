@@ -8,8 +8,8 @@ import { useRecurso } from './cargar';
 import { Manzana } from '../Logotipo';
 import { llamar, useRellenoPestanas } from './piezas';
 import { textoHorario, textoUltimoPedido } from './horario';
-import { simboloRubro } from '../simbolos';
 import { useCliente } from './estado';
+import { Icono, iconoDeRubro } from '../iconos';
 
 /**
  * La feria.
@@ -159,9 +159,9 @@ export default function Feria({ navegar }: { navegar: (p: string, args?: any) =>
               onPress={() => navegar('Categoria', { rubroId: r.id, nombre: r.nombre })}
               style={({ pressed }) => [e.rubro, pressed && { opacity: 0.8 }]}
             >
-              <Text style={{ fontSize: 20, marginBottom: 2 }}>
-                {simboloRubro(r.id, r.nombre) ?? '🧺'}
-              </Text>
+              <View style={{ marginBottom: 4 }}>
+                <Icono nombre={iconoDeRubro(r.id).icono} tamano={22} color={iconoDeRubro(r.id).color} />
+              </View>
               <Text style={T.destacado}>{r.nombre}</Text>
               <Text style={T.micro}>
                 {r.productos.length} {r.productos.length === 1 ? 'producto' : 'productos'}
@@ -176,7 +176,7 @@ export default function Feria({ navegar }: { navegar: (p: string, args?: any) =>
           onPress={() => llamar(feria.contacto)}
           style={({ pressed }) => [e.bloque, e.contacto, pressed && { opacity: 0.85 }]}
         >
-          <Text style={{ fontSize: 20 }}>📞</Text>
+          <Icono nombre="telefono" tamano={20} color={C.verdeOscuro} />
           <View style={{ flex: 1 }}>
             <Text style={T.destacado}>Hablar con nosotros</Text>
             <Text style={T.micro}>{feria.contacto}</Text>

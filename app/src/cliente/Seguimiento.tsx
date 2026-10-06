@@ -7,6 +7,7 @@ import { Boton, Cargando, Chip, tonoEstado } from '../ui';
 import { Pasos, llamar } from './piezas';
 import { Linea } from './Carrito';
 import { abrirPago } from './Pago';
+import { Icono } from '../iconos';
 
 /**
  * Seguimiento del pedido.
@@ -66,7 +67,7 @@ export default function Seguimiento({
     <View style={e.pantalla}>
       <View style={e.cabecera}>
         <Pressable onPress={volver} hitSlop={10} style={e.atras}>
-          <Text style={e.flecha}>‹</Text>
+          <Icono nombre="atras" tamano={22} color={C.texto} />
         </Pressable>
         <Text style={[T.encabezado, { flex: 1 }]}>Pedido #{datos.numero}</Text>
         <Chip texto={datos.estado.replace(/_/g, ' ')} tono={tonoEstado(datos.estado)} />

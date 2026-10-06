@@ -123,3 +123,24 @@ export async function enviarCorreo(
   console.log(`  └─ (sin proveedor de correo configurado: no se envió de verdad)\n`);
   return { enviado: true, proveedor: 'consola' };
 }
+
+/**
+ * El marco de todos los correos: la franja de la marca arriba, el
+ * contenido en una tarjeta y un pie discreto. Sin imágenes, porque
+ * los correos con imágenes de un remitente nuevo caen más en spam y
+ * muchos clientes las bloquean.
+ */
+export function plantillaCorreo(contenido: string, pie = ''): string {
+  return `<!doctype html>
+<html lang="es"><body style="margin:0;padding:0;background:#F4F6F4;font-family:Arial,Helvetica,sans-serif;color:#16211D">
+<div style="max-width:480px;margin:0 auto;padding:24px 16px">
+  <div style="background:#8B2838;border-radius:16px 16px 0 0;padding:18px 24px">
+    <span style="font-size:20px;font-weight:bold;color:#FFFFFF;letter-spacing:0.3px">Feria App</span>
+    <span style="font-size:13px;color:#F3D9DD;margin-left:8px">tu feria libre, a domicilio</span>
+  </div>
+  <div style="background:#FFFFFF;border:1px solid #E4E7E4;border-top:0;border-radius:0 0 16px 16px;padding:24px">
+${contenido}
+  </div>
+  <p style="font-size:12px;line-height:1.5;color:#6B7670;margin:16px 8px 0;text-align:center">${pie || 'Feria App · Región de Valparaíso'}</p>
+</div></body></html>`;
+}

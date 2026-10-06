@@ -8,6 +8,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { C, E, R, T } from '../tema';
+import { Icono, type NombreIcono } from '../iconos';
 import { ProveedorCliente, useCliente } from './estado';
 import Inicio from './Inicio';
 import Feria from './Feria';
@@ -48,11 +49,11 @@ type Pila = {
 const Tabs = createBottomTabNavigator<Pestanas>();
 const Stack = createNativeStackNavigator<Pila>();
 
-const ICONOS: Record<keyof Pestanas, string> = {
-  Inicio: '🧺',
-  Feria: '📍',
-  Pedidos: '🧾',
-  Perfil: '👤',
+const ICONOS: Record<keyof Pestanas, NombreIcono> = {
+  Inicio: 'inicio',
+  Feria: 'feria',
+  Pedidos: 'pedidos',
+  Perfil: 'perfil',
 };
 
 /** Barra de pestañas propia: la del sistema no se parece al diseño. */
@@ -74,7 +75,7 @@ function Barra({ state, navigation }: BottomTabBarProps) {
             accessibilityState={{ selected: activa }}
           >
             <View style={[e.icono, activa && { backgroundColor: C.verdeSuave }]}>
-              <Text style={{ fontSize: 17, opacity: activa ? 1 : 0.45 }}>{ICONOS[nombre]}</Text>
+              <Icono nombre={ICONOS[nombre]} tamano={21} color={activa ? C.verdeOscuro : C.textoSuave} />
               {nombre === 'Inicio' && unidades > 0 ? (
                 <View style={e.globo}>
                   <Text style={e.globoTexto}>{unidades}</Text>

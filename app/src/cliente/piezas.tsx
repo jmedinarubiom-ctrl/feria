@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
+  Alert, Animated, Image, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
   type ImageStyle, type StyleProp, type TextInputProps, type ViewStyle,
 } from 'react-native';
 
@@ -67,14 +67,21 @@ export function Contador({
 
 /** Botón redondo de «agregar», el que va sobre las tarjetas del catálogo. */
 export function MasRedondo({ onPress }: { onPress: () => void }) {
+  // Un rebote corto al agregar: sin él, tocar el «+» no se siente
+  // como que pasó algo hasta mirar el número del carro.
+  const escala = React.useRef(new Animated.Value(1)).current;
+  const tocar = () => {
+    Animated.sequence([
+      Animated.timing(escala, { toValue: 1.25, duration: 90, useNativeDriver: true }),
+      Animated.spring(escala, { toValue: 1, friction: 4, useNativeDriver: true }),
+    ]).start();
+    onPress();
+  };
   return (
-    <Pressable
-      onPress={onPress}
-      hitSlop={8}
-      accessibilityLabel="Agregar al carrito"
-      style={({ pressed }) => [e.mas, pressed && { opacity: 0.75 }]}
-    >
-      <Text style={{ color: '#FFFFFF', fontSize: 18, lineHeight: 20 }}>+</Text>
+    <Pressable onPress={tocar} hitSlop={8} accessibilityLabel="Agregar al carrito">
+      <Animated.View style={[e.mas, { transform: [{ scale: escala }] }]}>
+        <Text style={{ color: '#FFFFFF', fontSize: 18, lineHeight: 20 }}>+</Text>
+      </Animated.View>
     </Pressable>
   );
 }

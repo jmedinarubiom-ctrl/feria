@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View,
+  ActivityIndicator, Animated, Pressable, ScrollView, StyleSheet, Text, View,
   type StyleProp, type ViewStyle,
 } from 'react-native';
 
@@ -294,11 +294,39 @@ export function BarraTiempo({ restante, total }: { restante: number; total: numb
   );
 }
 
+/**
+ * Mientras carga: la silueta de lo que viene.
+ *
+ * Un círculo girando en una pantalla vacía no dice cuánto falta ni
+ * qué va a aparecer. Unas tarjetas grises que laten suave se leen
+ * como «ya viene» y evitan el salto cuando llega el contenido.
+ */
 export function Cargando() {
+  const pulso = React.useRef(new Animated.Value(0.45)).current;
+  React.useEffect(() => {
+    const ciclo = Animated.loop(Animated.sequence([
+      Animated.timing(pulso, { toValue: 1, duration: 650, useNativeDriver: true }),
+      Animated.timing(pulso, { toValue: 0.45, duration: 650, useNativeDriver: true }),
+    ]));
+    ciclo.start();
+    return () => ciclo.stop();
+  }, [pulso]);
+
   return (
-    <View style={e.centrado}>
-      <ActivityIndicator color={C.verde} size="large" />
-    </View>
+    <Animated.View style={[e.silueta, { opacity: pulso }]} accessibilityLabel="Cargando">
+      <View style={[e.hueso, { width: '45%', height: 26 }]} />
+      <View style={[e.hueso, { width: '70%', height: 14, marginBottom: E.l }]} />
+      <View style={[e.hueso, { height: 52, borderRadius: R.pastilla, marginBottom: E.l }]} />
+      {[0, 1, 2].map((i) => (
+        <View key={i} style={e.huesoTarjeta}>
+          <View style={[e.hueso, { width: 56, height: 56, marginBottom: 0 }]} />
+          <View style={{ flex: 1, gap: E.s }}>
+            <View style={[e.hueso, { width: '60%', height: 16, marginBottom: 0 }]} />
+            <View style={[e.hueso, { width: '85%', height: 12, marginBottom: 0 }]} />
+          </View>
+        </View>
+      ))}
+    </Animated.View>
   );
 }
 
@@ -313,19 +341,22 @@ export function NoCargo({ error, onReintentar }: { error: string; onReintentar: 
   // falta saber es a qué servidor no se pudo llegar: casi siempre
   // es el teléfono en otra red, y con la dirección a la vista se
   // descubre en diez segundos en vez de en media hora.
-  const deRed = /network|failed to fetch|timeout|abort/i.test(error);
+  const deRed = /network|failed to fetch|timeout|abort|sin conexi/i.test(error);
   return (
     <View style={e.vacio}>
       <Manzana tamano={56} />
       <Text style={[T.destacado, { marginTop: E.m, textAlign: 'center' }]}>
-        {deRed ? 'Sin conexión con el servidor' : 'No se pudo cargar'}
+        {deRed ? 'Sin conexión' : 'No se pudo cargar'}
       </Text>
       <Text style={[T.apoyo, { textAlign: 'center', marginTop: 2 }]}>
         {deRed
-          ? 'Revisa que estés en la misma red que el servidor de la feria.'
+          ? 'Revisa tu señal o tu wifi y vuelve a intentar.'
           : error}
       </Text>
-      <Text style={[T.micro, { textAlign: 'center', marginTop: E.s }]}>{servidor()}</Text>
+      {/* La dirección solo ayuda a quien está desarrollando. */}
+      {__DEV__ ? (
+        <Text style={[T.micro, { textAlign: 'center', marginTop: E.s }]}>{servidor()}</Text>
+      ) : null}
       <View style={{ marginTop: E.l, alignSelf: 'stretch' }}>
         <Boton titulo="REINTENTAR" onPress={onReintentar} />
       </View>
@@ -333,7 +364,11 @@ export function NoCargo({ error, onReintentar }: { error: string; onReintentar: 
   );
 }
 
-export function Vacio({ texto }: { texto: string }) {
+export function Vacio({ texto, accion }: {
+  texto: string;
+  /** Un botón para salir del vacío: «no hay nada» sin camino es un callejón. */
+  accion?: { titulo: string; onPress: () => void };
+}) {
   return (
     <View style={e.vacio}>
       {/* Una manzana apagada: llena el hueco sin gritar y mantiene
@@ -342,6 +377,11 @@ export function Vacio({ texto }: { texto: string }) {
         <Manzana tamano={52} />
       </View>
       <Text style={[T.apoyo, { textAlign: 'center' }]}>{texto}</Text>
+      {accion ? (
+        <View style={{ marginTop: E.l, alignSelf: 'stretch' }}>
+          <Boton titulo={accion.titulo} onPress={accion.onPress} />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -446,4 +486,10 @@ const e = StyleSheet.create({
 
   centrado: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: E.xxxl },
   vacio: { padding: E.xxl, alignItems: 'center' },
+  silueta: { flex: 1, padding: E.l, paddingTop: E.xl },
+  hueso: { backgroundColor: C.borde, borderRadius: R.chico, marginBottom: E.s },
+  huesoTarjeta: {
+    flexDirection: 'row', alignItems: 'center', gap: E.m, padding: E.m, marginBottom: E.m,
+    backgroundColor: C.superficie, borderRadius: R.grande, borderWidth: 1, borderColor: C.linea,
+  },
 });

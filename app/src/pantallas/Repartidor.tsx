@@ -139,7 +139,7 @@ export default function Repartidor({ repartidorId }: { repartidorId: string }) {
                 color: /^marcado/.test(viajeActivo.geo_precision ?? '') ? C.verdeOscuro : C.naranja,
               }]}>
                 {/^marcado/.test(viajeActivo.geo_precision ?? '')
-                  ? `📍 Punto exacto ${viajeActivo.geo_precision}`
+                  ? `Punto exacto ${viajeActivo.geo_precision}`
                   : 'El punto del mapa es aproximado: guíate por la dirección.'}
               </Text>
               {viajeActivo.notas ? (

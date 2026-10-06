@@ -8,6 +8,7 @@ import { Contador } from './piezas';
 import { Foto } from '../producto';
 import { simboloProducto } from '../simbolos';
 import { useCliente } from './estado';
+import { Icono } from '../iconos';
 
 /**
  * Detalle del producto.
@@ -40,7 +41,7 @@ export default function Producto({
             simbolo={simboloProducto(producto)}
           />
           <Pressable onPress={volver} style={[e.flotanteIzq]} hitSlop={10}>
-            <Text style={e.flecha}>‹</Text>
+            <Icono nombre="atras" tamano={22} color={C.texto} />
           </Pressable>
         </View>
 

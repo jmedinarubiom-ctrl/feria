@@ -68,9 +68,9 @@ export default function ConTerminos({ children, onSalir }: {
         </Text>
       </View>
       <ScrollView style={e.caja} contentContainerStyle={{ padding: E.l }}>
-        <Text style={T.cuerpo}>{textos.terminos.trim()}</Text>
+        <TextoLegal texto={textos.terminos} />
         <View style={e.separador} />
-        <Text style={T.cuerpo}>{textos.privacidad.trim()}</Text>
+        <TextoLegal texto={textos.privacidad} />
       </ScrollView>
       <View style={e.pie}>
         <Boton
@@ -84,7 +84,46 @@ export default function ConTerminos({ children, onSalir }: {
   );
 }
 
+/**
+ * Un texto legal, compuesto para leerse.
+ *
+ * El archivo viene cortado a 70 columnas, como se escribe en un
+ * editor: mostrado tal cual, cada línea se partía a mitad de frase.
+ * Acá cada párrafo se une, los títulos se ven como títulos y cada
+ * punto numerado lleva su nombre destacado.
+ */
+export function TextoLegal({ texto }: { texto: string }) {
+  const bloques = texto.trim().split(/\n\s*\n/).map((b) => b.replace(/\s*\n\s*/g, ' ').trim()).filter(Boolean);
+  return (
+    <View style={{ gap: E.m }}>
+      {bloques.map((b, i) => {
+        if (/^BORRADOR/i.test(b)) {
+          return <Text key={i} style={[T.micro, e.borrador]}>{b}</Text>;
+        }
+        const punto = /^(\d+)\.\s+([^.]{2,60}\.)\s*(.*)$/.exec(b);
+        if (punto) {
+          return (
+            <Text key={i} style={T.cuerpo}>
+              <Text style={T.destacado}>{punto[1]}. {punto[2]} </Text>
+              {punto[3]}
+            </Text>
+          );
+        }
+        // Una línea corta sin punto final es un título.
+        if (b.length < 60 && !/[.:;,]$/.test(b)) {
+          return <Text key={i} style={[T.encabezado, { marginTop: E.xs }]}>{b.replace(/^#+\s*/, '')}</Text>;
+        }
+        return <Text key={i} style={T.cuerpo}>{b}</Text>;
+      })}
+    </View>
+  );
+}
+
 const e = StyleSheet.create({
+  borrador: {
+    color: C.naranja, backgroundColor: C.naranjaSuave, borderRadius: R.chico,
+    paddingHorizontal: E.m, paddingVertical: E.s, overflow: 'hidden',
+  },
   pantalla: { flex: 1, backgroundColor: C.fondo },
   cabecera: { padding: E.l, paddingBottom: E.m },
   caja: {

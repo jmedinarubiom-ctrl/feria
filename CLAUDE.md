@@ -144,6 +144,22 @@ Para probar como cliente: cualquier otro celular chileno, por ejemplo
   no en disco de datos: así un despliegue no deja el catálogo sin
   imágenes. Las que sube el operador sí van a `FERIA_DATOS`.
 
+## Aspecto (retoque del 6 de octubre de 2026)
+
+- **Íconos propios, no emojis**: `app/src/iconos.tsx` (de línea, con
+  react-native-svg). Cada rubro tiene su ícono y su color
+  (`iconoDeRubro`). Los emojis de `simbolos.ts` quedan solo como
+  reserva de un producto sin foto.
+- **Títulos en Fredoka 600/500** (antes 700/600, se veía de juguete).
+- Inicio: rubros en un carril que se desliza y la fila «Lo de
+  siempre» con ocho productos básicos (lista fija, `BASICOS`).
+- `Cargando` es una silueta que late, no un círculo; `Vacio` acepta
+  un botón; `TextoLegal` compone los términos (une las líneas
+  cortadas a 70 columnas).
+- Los correos comparten `plantillaCorreo` (`backend/src/correo.ts`):
+  franja burdeo, sin imágenes.
+- Las fotos de producto no se tocaron, a pedido de Juan Manuel.
+
 ## Dónde corre (desde el 6 de octubre de 2026)
 
 Juan Manuel no quiere Render. El servidor corre como **función de

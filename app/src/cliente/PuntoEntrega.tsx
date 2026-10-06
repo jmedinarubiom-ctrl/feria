@@ -44,7 +44,7 @@ const paginaDelMapa = (lat: number, lng: number) => `<!doctype html>
           margin: -36px 0 0 -18px; z-index: 1000; pointer-events: none; font-size: 36px;
           line-height: 36px; text-align: center; }
 </style></head>
-<body><div id="mapa"></div><div id="mira">📍</div>
+<body><div id="mapa"></div><div id="mira"><svg width="40" height="40" viewBox="0 0 24 24"><path d="M12 22s-7-6.3-7-12a7 7 0 0 1 14 0c0 5.700-7 12-7 12z" fill="#8B2838" stroke="#fff" stroke-width="1.2"/><circle cx="12" cy="10" r="2.6" fill="#fff"/></svg></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
   var mapa = L.map('mapa', { zoomControl: true }).setView([${lat}, ${lng}], 18);
@@ -197,7 +197,7 @@ export default function PuntoEntrega({ direccion, feriaId, punto, onCambio }: {
             <View style={{ padding: E.l, paddingBottom: E.s }}>
               <Text style={T.encabezado}>Mueve el mapa hasta la puerta</Text>
               <Text style={T.apoyo}>
-                El pin 📍 queda fijo al centro.
+                El pin queda fijo al centro.
                 {inicio.encontrada === false
                   ? ' No encontramos la dirección escrita: búscala moviendo y acercando el mapa.'
                   : ''}

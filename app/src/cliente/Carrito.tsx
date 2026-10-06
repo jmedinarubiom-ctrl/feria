@@ -9,6 +9,7 @@ import { Contador } from './piezas';
 import { Foto } from '../producto';
 import { simboloProducto } from '../simbolos';
 import { useCliente } from './estado';
+import { Icono } from '../iconos';
 
 /** El carro, con la cotización que hace el servidor. */
 export default function Carrito({
@@ -54,7 +55,7 @@ export default function Carrito({
     <View style={e.pantalla}>
       <View style={e.cabecera}>
         <Pressable onPress={volver} hitSlop={10} style={e.atras}>
-          <Text style={e.flecha}>‹</Text>
+          <Icono nombre="atras" tamano={22} color={C.texto} />
         </Pressable>
         <Text style={[T.encabezado, { flex: 1 }]}>Tu carrito</Text>
         {unidades > 0 ? (

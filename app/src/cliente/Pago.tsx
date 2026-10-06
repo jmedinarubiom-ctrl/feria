@@ -10,6 +10,7 @@ import { Campo } from './piezas';
 import { Linea } from './Carrito';
 import { useCliente, type Perfil } from './estado';
 import PuntoEntrega, { puntoVigente } from './PuntoEntrega';
+import { Icono } from '../iconos';
 
 /**
  * Entrega y pago.
@@ -109,7 +110,7 @@ export default function Pago({
     <View style={e.pantalla}>
       <View style={e.cabecera}>
         <Pressable onPress={volver} hitSlop={10} style={e.atras}>
-          <Text style={e.flecha}>‹</Text>
+          <Icono nombre="atras" tamano={22} color={C.texto} />
         </Pressable>
         <Text style={[T.encabezado, { flex: 1 }]}>Pagar</Text>
       </View>
@@ -166,7 +167,7 @@ export default function Pago({
         <View style={e.bloque}>
           <Text style={[T.destacado, { marginBottom: E.s }]}>Cómo pagas</Text>
           <View style={e.medio}>
-            <Text style={{ fontSize: 22 }}>💳</Text>
+            <Icono nombre="tarjeta" tamano={24} color={C.verdeOscuro} />
             <View style={{ flex: 1 }}>
               <Text style={T.destacado}>Tarjeta o transferencia</Text>
               <Text style={T.micro}>Pagas en la página segura de la pasarela</Text>

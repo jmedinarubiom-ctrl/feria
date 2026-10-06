@@ -10,6 +10,7 @@ import { MasRedondo, Pildoras } from './piezas';
 import { Foto } from '../producto';
 import { simboloProducto } from '../simbolos';
 import { useCliente } from './estado';
+import { Icono } from '../iconos';
 
 /** Grilla de productos de un rubro, con filtro y barra de carrito. */
 export default function Categoria({
@@ -48,7 +49,7 @@ export default function Categoria({
     <View style={e.pantalla}>
       <View style={e.cabecera}>
         <Pressable onPress={volver} hitSlop={10} style={e.atras}>
-          <Text style={e.flecha}>‹</Text>
+          <Icono nombre="atras" tamano={22} color={C.texto} />
         </Pressable>
         <Text style={[T.encabezado, { flex: 1 }]}>{nombre}</Text>
       </View>
@@ -98,14 +99,14 @@ export default function Categoria({
           onPress={() => navegar('Carrito')}
           style={[e.barraCarro, { bottom: Math.max(inset.bottom, E.l) }]}
         >
-          <Text style={e.carroIcono}>🧺</Text>
+          <Icono nombre="canasto" tamano={20} color="#FFFFFF" />
           <View style={{ flex: 1 }}>
             <Text style={[T.micro, { color: 'rgba(255,255,255,0.85)' }]}>
               {unidades} {unidades === 1 ? 'producto' : 'productos'}
             </Text>
             <Text style={[T.destacado, { color: '#FFFFFF' }]}>{clp(total)}</Text>
           </View>
-          <Text style={[T.destacado, { color: '#FFFFFF' }]}>Ver carrito ›</Text>
+          <Text style={[T.destacado, { color: '#FFFFFF' }]}>Ver carrito</Text>
         </Pressable>
       ) : null}
     </View>

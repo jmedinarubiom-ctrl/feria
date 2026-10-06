@@ -92,8 +92,10 @@ export const ELEV = {
 } as const;
 
 export const FUENTES = {
-  titulo: 'Fredoka_600SemiBold',
-  tituloFuerte: 'Fredoka_700Bold',
+  // Un peso menos que antes: en negrita Fredoka se empasta y se ve
+  // de juguete; en seminegrita se parece a la letra del logo.
+  titulo: 'Fredoka_500Medium',
+  tituloFuerte: 'Fredoka_600SemiBold',
   cuerpo: 'Nunito_400Regular',
   cuerpoFuerte: 'Nunito_700Bold',
 } as const;
@@ -116,7 +118,7 @@ export const T = {
   },
 
   titulo: {
-    fontFamily: FUENTES.tituloFuerte, fontSize: 26, color: C.texto, letterSpacing: -0.4,
+    fontFamily: FUENTES.tituloFuerte, fontSize: 26, color: C.texto, letterSpacing: -0.2,
   },
   encabezado: {
     fontFamily: FUENTES.titulo, fontSize: 18, color: C.texto,

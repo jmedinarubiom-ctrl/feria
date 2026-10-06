@@ -9,7 +9,7 @@ import {
 } from './src/almacen';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { useFonts } from 'expo-font';
-import { Fredoka_600SemiBold, Fredoka_700Bold } from '@expo-google-fonts/fredoka';
+import { Fredoka_500Medium, Fredoka_600SemiBold } from '@expo-google-fonts/fredoka';
 import { Nunito_400Regular, Nunito_700Bold } from '@expo-google-fonts/nunito';
 
 import { C, E, R, T } from './src/tema';
@@ -49,7 +49,7 @@ function Raiz() {
   const [estado, setEstado] = useState<Estado>({ fase: 'cargando' });
   const [push, setPush] = useState<EstadoPush | null>(null);
   const [fuentesListas] = useFonts({
-    Fredoka_600SemiBold, Fredoka_700Bold, Nunito_400Regular, Nunito_700Bold,
+    Fredoka_500Medium, Fredoka_600SemiBold, Nunito_400Regular, Nunito_700Bold,
   });
 
   const salir = useCallback(async (avisarAlServidor: boolean) => {

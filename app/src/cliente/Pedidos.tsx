@@ -47,7 +47,10 @@ export default function Pedidos({ navegar }: { navegar: (p: string, args?: any) 
 
       {pedidos.length === 0 ? (
         <View style={{ marginTop: E.xl }}>
-          <Vacio texto="Todavía no hiciste pedidos. Tu feria llega el mismo día." />
+          <Vacio
+            texto="Todavía no has hecho pedidos. Lo que pidas llega el mismo día de feria."
+            accion={{ titulo: 'VER PRODUCTOS', onPress: () => navegar('Inicio') }}
+          />
         </View>
       ) : null}
 

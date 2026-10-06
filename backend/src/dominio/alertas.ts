@@ -1,5 +1,5 @@
 import { consultar, consultarUno, ejecutar, type Fila } from '../db/index.ts';
-import { enviarCorreo } from '../correo.ts';
+import { enviarCorreo, plantillaCorreo } from '../correo.ts';
 
 /**
  * Avisos al operador cuando algo necesita que mire.
@@ -111,7 +111,12 @@ export async function revisarYAvisar(silencio: number | null = null): Promise<nu
   const asunto = nuevos.length === 1
     ? 'Feria App: algo necesita que lo mires'
     : `Feria App: ${nuevos.length} cosas necesitan que las mires`;
-  const r = await enviarCorreo(a, asunto, texto);
+  const html = plantillaCorreo(
+    `    <p style="font-size:16px;font-weight:bold;margin:0 0 12px">Algo necesita que lo mires</p>
+    <ul style="margin:0;padding-left:20px;font-size:15px;line-height:1.6">
+${nuevos.map((x) => `<li style="margin-bottom:8px">${x.texto.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!))}</li>`).join('\n')}
+    </ul>`, 'Aviso automático para el operador de la feria.');
+  const r = await enviarCorreo(a, asunto, texto, html);
   if (!r.enviado) {
     // No salió: se olvidan para que el próximo minuto lo reintente.
     for (const x of nuevos) await ejecutar('DELETE FROM alertas WHERE clave = ?', x.clave);
