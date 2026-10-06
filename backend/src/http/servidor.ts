@@ -63,6 +63,8 @@ import {
 } from '../dominio/archivos.ts';
 import { leerReferencia, creditos } from '../dominio/referencia.ts';
 import { latir } from '../motor.ts';
+import { iniciarComprobantes } from '../dominio/comprobante.ts';
+import { comoEscuchar, iniciarDifusion } from '../realtime/difusion.ts';
 import { deQuien, pasar, limpiar as limpiarFrenos, LIMITE_POR_MINUTO } from './freno.ts';
 
 // ============================================================
@@ -293,6 +295,21 @@ POST('/auth/sesion', async (c) => {
   return {
     token: s.token, rol: s.rol, actorId: s.actorId, nombre: s.nombre, expiraAt: s.expiraAt,
   };
+});
+
+/**
+ * Cómo escuchar los avisos en vivo cuando no hay WebSocket propio
+ * (el servidor corre como función). El cliente que sigue un pedido
+ * no tiene sesión: su llave es el id del pedido, igual que antes.
+ */
+GET('/vivo', async (c) => {
+  const pedido = c.consulta.get('pedido');
+  if (pedido) {
+    if (!/^[A-Za-z0-9_-]{6,64}$/.test(pedido)) throw new ErrorHttp(422, 'Pedido inválido.');
+    return comoEscuchar({ rol: 'cliente', id: pedido });
+  }
+  const yo = await identidad(c);
+  return comoEscuchar({ rol: yo.rol, id: yo.actorId });
 });
 
 GET('/auth/yo', async (c) => {
@@ -1045,6 +1062,12 @@ POST('/interno/latir', async (c) => {
     const h = c.req.headers;
     return { eco: { xff: h['x-forwarded-for'], cf: h['cf-connecting-ip'], real: h['x-real-ip'], quien: deQuien(c.req) } };
   }
+  if (typeof c.cuerpo?.aviso === 'string') {
+    // Para probar el canal en vivo de punta a punta: un aviso de
+    // «algo cambió» en ese pedido, sin tocar ningún dato.
+    bus.emit('mensaje', { tipo: 'pedido:cambio', pedidoId: c.cuerpo.aviso, estado: '' });
+    return { ok: true, avisado: c.cuerpo.aviso };
+  }
   const hasta = Date.now() + Math.min(Number(c.cuerpo?.segundos ?? 58), 120) * 1000;
   // Sin un proceso que viva siempre, la limpieza de datos viejos
   // también cuelga de este reloj: cuatro veces al día.
@@ -1258,12 +1281,15 @@ async function manejar(req: IncomingMessage, res: ServerResponse) {
 export async function preparar(url?: string): Promise<void> {
   await abrirDB({ url, sinMigrar: true });
   iniciarNotificaciones();
+  iniciarDifusion();
+  iniciarComprobantes();
 }
 
 export async function iniciar(puerto = CONFIG.puerto, opciones: { memoria?: boolean } = {}) {
   await abrirDB(opciones);
   await sembrar();
   iniciarNotificaciones();
+  iniciarComprobantes();
 
   const servidor = createServer((req, res) => {
     // Última red: pase lo que pase adentro, una petición no puede

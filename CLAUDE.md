@@ -35,7 +35,7 @@ nunca voseo rioplatense).
     ./feria.sh               # backend + túnel público (desde cualquier red)
     ./respaldar.sh           # respaldo de base y fotos (con RESPALDO_CLAVE sale cifrado)
 
-    cd backend && npm test   # 273 pruebas (6 de carreras se saltan sin Postgres)
+    cd backend && npm test   # 276 pruebas (6 de carreras se saltan sin Postgres)
     cd backend && DATABASE_URL=… npm run test:postgres   # todas, contra Postgres real. VACÍA esa base.
     cd app && npx tsc --noEmit
 
@@ -163,10 +163,13 @@ Supabase** (`supabase/functions/api`, proyecto `feriapp`):
   late 58 s (`motor.ts`). La tabla `motor` da el turno: si el Mac
   también está encendido, late uno solo. Se reprograma con
   `node --env-file=.env herramientas/programar-latido.mjs`.
-- **Sin WebSocket**: la app detecta `/functions/v1/` y consulta cada
-  8 s. Cuota gratis: 500.000 llamadas al mes; un teléfono con la app
-  abierta gasta ~10.000 al día. Para abrir al público hay que pasar
-  a Supabase Realtime o pagar.
+- **Avisos en vivo por Supabase Realtime** (`realtime/difusion.ts`):
+  la función no tiene WebSocket propio. Cada mensaje del bus sale
+  como un aviso sin datos a canales de nombre secreto (HMAC); la
+  app pide `/vivo`, se conecta (`abrirCanal` en `app/src/api.ts`) y
+  al recibir un aviso vuelve a preguntar por la API. Si el canal no
+  conecta, consulta cada 8 s (eso sí gasta la cuota de 500.000
+  llamadas al mes). Un test compara los canales con `leRegistra`.
 - **Sin HTML**: Supabase lo entrega como texto plano. El panel se
   abre desde el Mac (`localhost:4000/admin`, misma base) y
   `/pagos/retorno` redirige a `feria://pago` (`FERIA_SIN_HTML=1`).
@@ -231,7 +234,9 @@ Auditoría del 6 de octubre (función publicada), pendientes:
    tarda ~0,5 s; al desplegar conviene un proyecto en São Paulo.
    Tras cambiar la contraseña de la base, el pooler tarda cerca de
    un minuto en aceptarla.
-4. **Correo de respaldo al cliente** por cada pedido. No existe.
+4. ~~Correo de respaldo al cliente.~~ Hecho: `dominio/comprobante.ts`
+   lo manda al quedar pagado el pedido, una sola vez
+   (`pedidos.comprobante_at`). No es la boleta.
 5. **Logo en alta.** El original es 266×302; el ícono de 1024 px es
    una ampliación de 2,4×. Para publicar en tiendas hace falta el
    archivo grande.

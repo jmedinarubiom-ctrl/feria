@@ -190,6 +190,63 @@ export const canjearCodigo = (
 });
 
 /**
+ * Escucha canales de Supabase Realtime.
+ *
+ * Es el protocolo de Phoenix sobre un WebSocket: entrar a cada canal,
+ * mandar un latido cada 25 segundos y avisar cuando llega algo. Son
+ * tan pocas líneas que no vale sumar una biblioteca al paquete.
+ */
+function abrirCanal(
+  url: string, llave: string, canales: string[],
+  al: { alAviso: () => void; alEstado: (arriba: boolean) => void },
+): { cerrar: () => void } {
+  let abierto = true;
+  let ws: WebSocket | null = null;
+  let latido: ReturnType<typeof setInterval> | undefined;
+  let otraVez: ReturnType<typeof setTimeout> | undefined;
+  let n = 0;
+
+  const conectar = () => {
+    if (!abierto) return;
+    ws = new WebSocket(`${url}?apikey=${encodeURIComponent(llave)}&vsn=1.0.0`);
+    const enviar = (topic: string, event: string, payload: unknown) =>
+      ws?.send(JSON.stringify({ topic, event, payload, ref: String(++n) }));
+    ws.onopen = () => {
+      for (const c of canales) {
+        enviar(`realtime:${c}`, 'phx_join', {
+          config: { broadcast: { self: false, ack: false }, presence: { key: '' }, private: false },
+        });
+      }
+      latido = setInterval(() => enviar('phoenix', 'heartbeat', {}), 25000);
+    };
+    ws.onmessage = (e) => {
+      let m: any;
+      try { m = JSON.parse(String(e.data)); } catch { return; }
+      if (m?.event === 'broadcast') al.alAviso();
+      else if (m?.event === 'phx_reply' && String(m.topic).startsWith('realtime:')) {
+        al.alEstado(m.payload?.status === 'ok');
+      }
+    };
+    ws.onerror = () => {};
+    ws.onclose = () => {
+      clearInterval(latido);
+      al.alEstado(false);
+      if (abierto) otraVez = setTimeout(conectar, 5000);
+    };
+  };
+  conectar();
+
+  return {
+    cerrar: () => {
+      abierto = false;
+      clearInterval(latido);
+      clearTimeout(otraVez);
+      ws?.close();
+    },
+  };
+}
+
+/**
  * Carga un endpoint y lo vuelve a pedir cuando el WebSocket avisa
  * que algo cambió.
  *
@@ -245,18 +302,45 @@ export function useTablero(camino: string, rol: string, actorId: string) {
       };
     };
 
+    // Con el servidor como función, los avisos llegan por el canal
+    // en vivo de Supabase: el servidor dice dónde y qué escuchar.
+    let canal: { cerrar: () => void } | null = null;
+    const escuchar = async () => {
+      if (!vivo || !sinSocket()) return;
+      try {
+        const como = await api('GET', rol === 'cliente'
+          ? `/vivo?pedido=${encodeURIComponent(actorId)}` : '/vivo');
+        if (!vivo || !como?.disponible) return;
+        canal = abrirCanal(como.url, como.llave, como.canales, {
+          alAviso: () => { void recargar(); },
+          alEstado: (arriba) => {
+            enVivoRef.current = arriba; setEnVivo(arriba);
+            if (arriba) void recargar();
+          },
+        });
+      } catch {
+        if (vivo) reintento = setTimeout(escuchar, 15000);
+      }
+    };
+
     void recargar();
     conectar();
+    void escuchar();
 
     // Red de seguridad por si el socket queda colgado sin cerrarse:
     // las ofertas vencen por tiempo y la pantalla tiene que enterarse.
     const encuesta = setInterval(
       () => { if (!enVivoRef.current) void recargar(); }, sinSocket() ? 8000 : 5000);
+    // Con el canal arriba igual se pregunta de vez en cuando: un
+    // aviso perdido no puede dejar la pantalla detenida.
+    const repaso = setInterval(() => { if (enVivoRef.current && sinSocket()) void recargar(); }, 60000);
 
     return () => {
       vivo = false;
       clearTimeout(reintento);
       clearInterval(encuesta);
+      clearInterval(repaso);
+      canal?.cerrar();
       ws?.close();
     };
   }, [rol, actorId, recargar]);
