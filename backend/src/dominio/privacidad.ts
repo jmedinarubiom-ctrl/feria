@@ -199,6 +199,10 @@ export async function limpiarDatosViejos(): Promise<Record<string, number>> {
   const r = CONFIG.retencion;
   const hechos: Record<string, number> = {};
 
+  // Registros técnicos: un mes alcanza para investigar cualquier cosa.
+  hechos.errores = (await ejecutar(`DELETE FROM errores WHERE cuando < now() - interval '30 days'`)).afectadas;
+  hechos.alertas = (await ejecutar(`DELETE FROM alertas WHERE enviada_at < now() - interval '30 days'`)).afectadas;
+
   hechos.ubicaciones = (await ejecutar(
     'DELETE FROM ubicaciones WHERE at < now() - make_interval(days => ?)', r.ubicacionesDias,
   )).afectadas;

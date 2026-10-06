@@ -63,6 +63,7 @@ import {
 } from '../dominio/archivos.ts';
 import { leerReferencia, creditos } from '../dominio/referencia.ts';
 import { latir } from '../motor.ts';
+import { erroresRecientes, registrarError, revisarYAvisar, silencioDelMotor } from '../dominio/alertas.ts';
 import { iniciarComprobantes } from '../dominio/comprobante.ts';
 import { comoEscuchar, iniciarDifusion } from '../realtime/difusion.ts';
 import { deQuien, pasar, limpiar as limpiarFrenos, LIMITE_POR_MINUTO } from './freno.ts';
@@ -1033,6 +1034,12 @@ POST('/operador/reembolsos/:pagoId/hecho', async (c) => {
   return anotarReembolsoManual(c.params.pagoId, await actor(c, 'operador'));
 });
 
+/** Los últimos errores internos, para no depender de los registros del hosting. */
+GET('/operador/errores', async (c) => {
+  await actor(c, 'operador');
+  return { errores: await erroresRecientes() };
+});
+
 GET('/operador/eventos/:entidadId', async (c) => {
   await actor(c, 'operador');
   return consultar('SELECT * FROM eventos WHERE entidad_id = ? ORDER BY id', c.params.entidadId);
@@ -1080,7 +1087,10 @@ POST('/interno/latir', async (c) => {
       })
       .catch((e) => console.error('[retención]', e))
     : Promise.resolve();
-  const trabajo = Promise.all([latir(() => Date.now() < hasta), limpieza]).then(() => undefined);
+  // El silencio se mide antes de volver a latir: después ya no se nota.
+  const silencio = await silencioDelMotor();
+  const avisos = revisarYAvisar(silencio).catch((e) => { console.error('[alertas]', e); });
+  const trabajo = Promise.all([latir(() => Date.now() < hasta), limpieza, avisos]).then(() => undefined);
   // Si el entorno deja seguir trabajando después de responder, se
   // responde al tiro; si no, la respuesta espera al último latido.
   const fondo = (globalThis as any).EdgeRuntime?.waitUntil;
@@ -1249,7 +1259,11 @@ export async function atender(
       : e instanceof ErrorAuth ? e.codigo
       : e instanceof SyntaxError ? 400
       : 500;
-    if (codigo === 500) console.error('[error]', camino, e);
+    if (codigo === 500) {
+      console.error('[error]', camino, e);
+      const anotado = registrarError(camino, e);
+      (globalThis as any).EdgeRuntime?.waitUntil?.(anotado);
+    }
     // El detalle de un error interno queda en el registro, no viaja
     // al cliente: puede traer nombres de tablas o de columnas.
     return enJson(codigo, {

@@ -356,3 +356,22 @@ CREATE TABLE IF NOT EXISTS archivos (
   datos     bytea NOT NULL,
   creado_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Errores internos del servidor. Los registros de la función duran
+-- poco: acá quedan para poder mirarlos después.
+CREATE TABLE IF NOT EXISTS errores (
+  id       bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  cuando   timestamptz NOT NULL DEFAULT now(),
+  camino   text NOT NULL,
+  mensaje  text NOT NULL,
+  pila     text
+);
+CREATE INDEX IF NOT EXISTS idx_errores_cuando ON errores(cuando);
+
+-- Avisos ya mandados al operador. La clave evita repetir el mismo
+-- aviso cada minuto mientras el problema siga ahí.
+CREATE TABLE IF NOT EXISTS alertas (
+  clave      text PRIMARY KEY,
+  texto      text NOT NULL,
+  enviada_at timestamptz NOT NULL DEFAULT now()
+);

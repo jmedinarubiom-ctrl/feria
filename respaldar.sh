@@ -36,7 +36,16 @@ mkdir -p "$DESTINO"
 DATOS="${FERIA_DATOS:-backend/datos}"
 
 echo "→ Base de datos…"
-if [ -n "${DATABASE_URL:-}" ]; then
+# La dirección de la base puede venir del entorno o de backend/.env.
+if [ -z "${DATABASE_URL:-}" ] && grep -q '^DATABASE_URL=' backend/.env 2>/dev/null; then
+  DATABASE_URL=$(grep '^DATABASE_URL=' backend/.env | tail -1 | cut -d= -f2-)
+  export DATABASE_URL
+fi
+
+if [ -n "${DATABASE_URL:-}" ] && ! command -v pg_dump > /dev/null; then
+  # Sin pg_dump instalado: volcado en JSON, tabla por tabla.
+  (cd backend && node herramientas/volcar.mjs "$TRABAJO/base.json.gz" | sed 's/→.*//;s/^/  /')
+elif [ -n "${DATABASE_URL:-}" ]; then
   # Postgres de verdad: un volcado lógico, que se restaura en
   # cualquier versión y se puede leer con un editor de texto.
   pg_dump --no-owner --no-privileges "$DATABASE_URL" > "$TRABAJO/base.sql"

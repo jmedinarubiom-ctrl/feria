@@ -143,12 +143,45 @@ export const fijarToken = (t: string | null): void => { tokenActual = t; };
 let alExpirar: (() => void) | null = null;
 export const cuandoExpireLaSesion = (fn: () => void): void => { alExpirar = fn; };
 
+const pausa = (ms: number) => new Promise<void>((r) => { setTimeout(r, ms); });
+
+/**
+ * Una petición que aguanta mala señal.
+ *
+ * En la feria la señal va y viene. Sin tope de tiempo, una petición
+ * que se quedó sin red deja la pantalla girando para siempre. Las
+ * lecturas (GET) se reintentan solas dos veces, porque repetirlas no
+ * cambia nada; un envío (POST) no, porque el servidor pudo haberlo
+ * recibido y repetirlo sería aceptar o pagar dos veces: ahí se le
+ * dice a la persona que no hay conexión y decide ella.
+ */
+async function pedir(url: string, init: RequestInit): Promise<Response> {
+  const lectura = init.method === 'GET';
+  const intentos = lectura ? 3 : 1;
+  for (let i = 1; ; i++) {
+    const corte = new AbortController();
+    const reloj = setTimeout(() => corte.abort(), lectura ? 15000 : 40000);
+    try {
+      return await fetch(url, { ...init, signal: corte.signal });
+    } catch {
+      if (i >= intentos) {
+        throw new ErrorApi(lectura
+          ? 'Sin conexión. Revisa tu señal.'
+          : 'Sin conexión: no se pudo enviar. Revisa tu señal e intenta de nuevo.', 0);
+      }
+      await pausa(i * 800);
+    } finally {
+      clearTimeout(reloj);
+    }
+  }
+}
+
 export async function api(
   metodo: 'GET' | 'POST',
   camino: string,
   opciones: { cuerpo?: unknown; sinSesion?: boolean } = {},
 ): Promise<any> {
-  const r = await fetch(servidor() + camino, {
+  const r = await pedir(servidor() + camino, {
     method: metodo,
     headers: {
       'content-type': 'application/json',

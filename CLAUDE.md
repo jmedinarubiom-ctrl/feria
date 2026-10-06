@@ -35,7 +35,7 @@ nunca voseo rioplatense).
     ./feria.sh               # backend + túnel público (desde cualquier red)
     ./respaldar.sh           # respaldo de base y fotos (con RESPALDO_CLAVE sale cifrado)
 
-    cd backend && npm test   # 276 pruebas (6 de carreras se saltan sin Postgres)
+    cd backend && npm test   # 279 pruebas (6 de carreras se saltan sin Postgres)
     cd backend && DATABASE_URL=… npm run test:postgres   # todas, contra Postgres real. VACÍA esa base.
     cd app && npx tsc --noEmit
 
@@ -184,6 +184,29 @@ Supabase** (`supabase/functions/api`, proyecto `feriapp`):
 - La red `10.20.50.x` donde estuvo el Mac ese día **bloquea
   `*.supabase.co`** por HTTPS (conexión cortada): desde ahí la
   función no se puede probar con curl ni la APK entra por ese wifi.
+
+Confiabilidad (6 de octubre de 2026):
+
+- **Chequeo de salud**, solo lectura:
+  `cd backend && node --env-file=.env herramientas/revisar.mjs`.
+- **Alarmas al operador** (`dominio/alertas.ts`): cada minuto, con el
+  latido, se revisa motor detenido, autogestiones, viajes sin
+  repartidor por más de 5 minutos y errores internos. Un correo por
+  problema nuevo, a `ALERTAS_CORREO` o, si no está, a la casilla de
+  `CORREO_SMTP_USUARIO`. Si la función entera está caída nadie
+  avisa: haría falta un monitor externo.
+- **Errores internos** en la tabla `errores`; `GET /operador/errores`
+  (todavía sin pantalla en el panel).
+- **Respaldos**: pg_cron copia cada tabla al esquema `respaldo` todos
+  los días (7 días; `herramientas/programar-respaldo.mjs`). Eso
+  cubre borrados por error, no la pérdida del proyecto: para eso
+  `./respaldar.sh`, que sin `pg_dump` baja la base en JSON
+  (`herramientas/volcar.mjs`). No hay nada que lo corra solo.
+- **La app con mala señal** (`pedir` en `app/src/api.ts`): tope de
+  tiempo, las lecturas se reintentan dos veces, los envíos no.
+- No se hizo una prueba automática de pedido completo contra el
+  servidor real: crearía pedidos falsos y les avisaría a feriantes
+  de verdad.
 
 Auditoría del 6 de octubre (función publicada), pendientes:
 
