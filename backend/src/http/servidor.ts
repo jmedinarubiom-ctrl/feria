@@ -325,6 +325,10 @@ GET('/auth/yo', async (c) => {
     ...yo,
     perfil,
     ...(yo.rol === 'operador' ? { conClave: !!clave_hash } : {}),
+    // El feriante ve en su encabezado de qué feria es su puesto.
+    ...(yo.rol === 'feriante' && perfil.feria_id ? {
+      feria: (await consultarUno<Fila>('SELECT nombre FROM ferias WHERE id = ?', perfil.feria_id))?.nombre ?? null,
+    } : {}),
     sesiones: await sesionesDe(yo.actorId),
     // El operador es quien pone los términos: no se los acepta a sí mismo.
     terminosPendientes: yo.rol !== 'operador' && await terminosPendientes(yo.actorId),

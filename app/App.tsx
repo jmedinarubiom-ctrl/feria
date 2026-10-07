@@ -52,6 +52,19 @@ function Raiz() {
     Fredoka_500Medium, Fredoka_600SemiBold, Nunito_400Regular, Nunito_700Bold,
   });
 
+  // De qué feria es el puesto del feriante: va en su encabezado,
+  // igual que el comprador ve en qué feria compra.
+  const [feria, setFeria] = useState<string | null>(null);
+  const rolDentro = estado.fase === 'dentro' ? estado.sesion.rol : null;
+  const actorDentro = estado.fase === 'dentro' ? estado.sesion.actorId : null;
+  useEffect(() => {
+    setFeria(null);
+    if (rolDentro !== 'feriante') return;
+    let vigente = true;
+    api('GET', '/auth/yo').then((yo) => { if (vigente) setFeria(yo.feria ?? null); }).catch(() => {});
+    return () => { vigente = false; };
+  }, [rolDentro, actorDentro]);
+
   const salir = useCallback(async (avisarAlServidor: boolean) => {
     if (avisarAlServidor) await api('POST', '/auth/salir').catch(() => {});
     fijarToken(null);
@@ -170,7 +183,7 @@ function Raiz() {
       <StatusBar barStyle="dark-content" backgroundColor={C.fondo} />
       <Cabecera
         nombre={sesion.nombre}
-        subtitulo={ROLES[sesion.rol] ?? sesion.rol}
+        subtitulo={feria ? `Puesto en ${feria}` : ROLES[sesion.rol] ?? sesion.rol}
         onSalir={() => Alert.alert('Cerrar sesión', `¿Salir de la cuenta de ${sesion.nombre}?`, [
           { text: 'Cancelar', style: 'cancel' },
           { text: 'Salir acá', style: 'destructive', onPress: () => void salir(true) },
