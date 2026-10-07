@@ -30,10 +30,33 @@
     },
     "produccion": {
       "autoIncrement": true,
-      "channel": "produccion"
+      "channel": "produccion",
+      "env": {
+        "EXPO_PUBLIC_FERIA_API": "https://umypcgakffoajvfkxnvp.supabase.co/functions/v1/api",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "574945498569-t934ng04r188mp1oqn9ta2tjpkl9rn4k.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "574945498569-jp9ikviba18f8ua1g2f7h1h8nb88bh24.apps.googleusercontent.com"
+      },
+      "ios": {
+        "resourceClass": "default"
+      }
+    },
+    "simulador": {
+      "ios": {
+        "simulator": true
+      },
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_FERIA_API": "https://umypcgakffoajvfkxnvp.supabase.co/functions/v1/api",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "574945498569-t934ng04r188mp1oqn9ta2tjpkl9rn4k.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "574945498569-jp9ikviba18f8ua1g2f7h1h8nb88bh24.apps.googleusercontent.com"
+      }
     }
   },
   "submit": {
-    "produccion": {}
+    "produccion": {
+      "ios": {
+        "language": "es-MX"
+      }
+    }
   }
 }

@@ -348,6 +348,27 @@ accesibilidad.
 `backend/.env` no está en el repositorio. `backend/.env.example` sí,
 con todo explicado.
 
+## Tiendas de apps
+
+`APPLE.md` tiene el paso a paso de la App Store, los textos de la
+ficha y las notas para la revisión. Lo que hay en el código:
+
+- **Cuenta de revisión**: `REVISION_CORREO` + `REVISION_CODIGO` (en
+  `.env`). Para ese correo el código es fijo y no se manda nada; es
+  un comprador común (`esDeRevision` en `dominio/auth.ts`).
+- **Feriantes y repartidores eliminan su cuenta** en la app (Salir →
+  Más opciones): `POST /cuenta/eliminar`, `eliminarCuentaEquipo`. Se
+  quedan sus pedidos y viajes, sin nombre ni teléfono; el teléfono
+  pasa a `eliminado:<id>`. Con trabajo a medias no se puede.
+- **Sitio público** en `sitio/` (privacidad, términos, soporte,
+  eliminar cuenta): `node --env-file=.env herramientas/sitio.mjs`.
+  Hay que publicarlo en algún hosting; la función de Supabase no
+  sirve HTML.
+- `APPLE_CLIENT_IDS=cl.feria.app`; falta el cliente de Google para
+  iOS (`EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`).
+- Falta la cuenta Apple Developer de Juan Manuel: sin ella no se
+  compila para iPhone ni se probó «Iniciar sesión con Apple».
+
 ## Notificaciones
 
 Avisos push por Expo: feriante (oferta), repartidor (viaje), operador

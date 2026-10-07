@@ -191,12 +191,11 @@ function Raiz() {
             // Para el teléfono que se perdió o se vendió: el token
             // de ese aparato vale 90 días y sin esto no hay forma
             // de cortarlo desde otro lado.
-            text: 'Salir de todos',
+            text: sesion.rol === 'operador' ? 'Salir de todos' : 'Más opciones',
             style: 'destructive',
             onPress: () => Alert.alert(
-              'Cerrar todas las sesiones',
-              'Vas a tener que entrar de nuevo en todos tus teléfonos. '
-              + 'Sirve si perdiste uno.',
+              sesion.rol === 'operador' ? 'Cerrar todas las sesiones' : 'Tu cuenta',
+              '«Cerrar todas» te saca de todos tus teléfonos: sirve si perdiste uno.',
               [
                 { text: 'Cancelar', style: 'cancel' },
                 {
@@ -207,6 +206,33 @@ function Raiz() {
                     await salir(false);
                   })(),
                 },
+                // Quien vende o reparte también puede irse del todo
+                // desde la app: las tiendas lo exigen. Va acá, a dos
+                // toques, porque no tiene vuelta.
+                ...(sesion.rol === 'feriante' || sesion.rol === 'repartidor' ? [{
+                  text: 'Eliminar mi cuenta',
+                  style: 'destructive' as const,
+                  onPress: () => Alert.alert(
+                    'Eliminar mi cuenta',
+                    'Se borran tu nombre y tu teléfono y no vas a poder entrar más. '
+                    + 'Lo que ya trabajaste queda registrado para los pagos, sin tus datos. '
+                    + 'No se puede deshacer.',
+                    [
+                      { text: 'Cancelar', style: 'cancel' },
+                      {
+                        text: 'Sí, eliminar',
+                        style: 'destructive',
+                        onPress: () => void (async () => {
+                          try {
+                            await api('POST', '/cuenta/eliminar', { cuerpo: { confirmo: 'ELIMINAR' } });
+                            await salir(false);
+                          } catch (err: any) {
+                            Alert.alert('No se pudo eliminar', err.message);
+                          }
+                        })(),
+                      },
+                    ]),
+                }] : []),
               ]),
           },
         ])}

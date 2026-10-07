@@ -23,9 +23,21 @@ const conHttp = (config) => withAndroidManifest(config, (c) => {
   return c;
 });
 
+/**
+ * «Entrar con Google» en iPhone vuelve a la app por un esquema que
+ * es el id del cliente de iOS al revés. Si ese id está definido, se
+ * registra; sin él, el botón de Google no se muestra en iPhone.
+ */
+const esquemaDeGoogle = () => {
+  const id = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
+  const m = /^(.+)\.apps\.googleusercontent\.com$/.exec(id ?? '');
+  return m ? [`com.googleusercontent.apps.${m[1]}`] : [];
+};
+
 module.exports = ({ config }) => {
   const { usesCleartextTraffic: _noExiste, ...android } = config.android ?? {};
-  const base = { ...config, android };
+  const scheme = [...[config.scheme ?? []].flat(), ...esquemaDeGoogle()];
+  const base = { ...config, scheme, android };
   // En el build que va a la tienda queda prohibido: todo lo que la
   // app mande —el teléfono, la dirección, el token de sesión— tiene
   // que ir por HTTPS.

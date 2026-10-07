@@ -34,7 +34,7 @@ import { externosDisponibles, verificarTokenExterno } from '../dominio/externo.t
 import { proveedorCorreo } from '../correo.ts';
 import {
   textosLegales, terminosPendientes, aceptarTerminos, datosDelCliente,
-  eliminarCuentaCliente, limpiarDatosViejos,
+  eliminarCuentaCliente, eliminarCuentaEquipo, limpiarDatosViejos,
 } from '../dominio/privacidad.ts';
 import { proveedorSms } from '../sms.ts';
 import { iniciarNotificaciones } from '../realtime/push.ts';
@@ -385,6 +385,16 @@ function paginaLegal(titulo: string, texto: string): RespuestaCruda {
 POST('/auth/aceptar-terminos', async (c) => {
   const yo = await identidad(c);
   return aceptarTerminos(yo.actorId, yo.rol, c.cuerpo?.version);
+});
+
+/** El feriante o el repartidor elimina su propia cuenta. */
+POST('/cuenta/eliminar', async (c) => {
+  const yo = await identidad(c);
+  if (yo.rol !== 'feriante' && yo.rol !== 'repartidor') {
+    throw new ErrorHttp(403, 'Esta cuenta se elimina desde otro lugar de la app.');
+  }
+  if (c.cuerpo?.confirmo !== 'ELIMINAR') throw new ErrorHttp(422, 'Falta confirmar.');
+  return eliminarCuentaEquipo(yo.rol, yo.actorId);
 });
 
 /** Una copia de todo lo que se guarda de quien la pide. */

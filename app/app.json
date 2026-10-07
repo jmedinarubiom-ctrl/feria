@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Feria",
+    "name": "Feria App",
     "slug": "feria",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -12,9 +12,16 @@
       "infoPlist": {
         "UIBackgroundModes": [
           "remote-notification"
-        ]
+        ],
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleDevelopmentRegion": "es",
+        "CFBundleAllowMixedLocalizations": true
       },
-      "usesAppleSignIn": true
+      "usesAppleSignIn": true,
+      "buildNumber": "1",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -57,14 +64,14 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Feria usa tu ubicación para marcar el punto exacto donde entregar tu pedido y, si repartes, para mostrar por dónde vas mientras llevas uno."
+          "locationWhenInUsePermission": "Feria App usa tu ubicación para marcar el punto exacto donde entregar tu pedido y, si repartes, para mostrar por dónde vas mientras llevas uno."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Feria necesita tus fotos para cargar la imagen de un producto del catálogo.",
-          "cameraPermission": "Feria usa la cámara para sacarle la foto a un producto del catálogo."
+          "photosPermission": "Feria App necesita tus fotos para cargar la imagen de un producto del catálogo.",
+          "cameraPermission": "Feria App usa la cámara para sacarle la foto a un producto del catálogo."
         }
       ],
       "expo-apple-authentication"

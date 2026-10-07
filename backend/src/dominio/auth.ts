@@ -504,6 +504,22 @@ export function normalizarCorreo(entrada: unknown): string {
 }
 
 /** Genera y guarda un código para un destino, con su freno de abuso. */
+/**
+ * La cuenta de prueba para quien revisa la app en las tiendas.
+ *
+ * Apple y Google prueban la app antes de publicarla y no pueden
+ * recibir un código en un correo nuestro. Para UN correo, definido en
+ * `REVISION_CORREO`, el código es siempre `REVISION_CODIGO` y no se
+ * manda nada. Es una cuenta de comprador como cualquier otra: no
+ * abre el panel ni ningún rol de la feria. Sin las dos variables no
+ * existe.
+ */
+export function esDeRevision(destino: string): boolean {
+  const correo = process.env.REVISION_CORREO?.trim().toLowerCase();
+  const codigo = process.env.REVISION_CODIGO;
+  return !!correo && !!codigo && /^\d{6}$/.test(codigo) && destino === correo;
+}
+
 async function emitirCodigo(destino: string): Promise<string> {
   const recientes = await consultarUno<Fila>(
     `SELECT COUNT(*)::int AS n FROM codigos_acceso
@@ -513,7 +529,9 @@ async function emitirCodigo(destino: string): Promise<string> {
     throw new ErrorAuth(429, 'Pediste demasiados códigos. Espera unos minutos.');
   }
 
-  const codigo = String(randomInt(0, 1_000_000)).padStart(6, '0');
+  const codigo = esDeRevision(destino)
+    ? process.env.REVISION_CODIGO!
+    : String(randomInt(0, 1_000_000)).padStart(6, '0');
   const expira = new Date(Date.now() + CONFIG.auth.vidaCodigoSegundos * 1000);
   await enTransaccion(async () => {
     await ejecutar(
@@ -548,6 +566,10 @@ export async function pedirCodigoPorCorreo(
   const minutos = Math.round(CONFIG.auth.vidaCodigoSegundos / 60);
   // El asunto no parte con el número: un asunto que es casi puro
   // código es una de las cosas que mandan un correo a spam.
+  if (esDeRevision(correo)) {
+    await registrarEvento('auth', correo, 'código de revisión', {});
+    return { enviado: true, expiraEn: CONFIG.auth.vidaCodigoSegundos };
+  }
   const envio = await enviarCorreo(correo, 'Tu código para entrar a la Feria',
     `Hola:\n\nTu código para entrar a Feria App es ${codigo}.\n\n`
     + `Escríbelo en la app. Vence en ${minutos} minutos.\n\n`

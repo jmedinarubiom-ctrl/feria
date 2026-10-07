@@ -270,3 +270,63 @@ export async function limpiarDatosViejos(): Promise<Record<string, number>> {
 
   return hechos;
 }
+
+// ============================================================
+// Irse, para quien vende o reparte
+// ============================================================
+
+/**
+ * Elimina la cuenta de un feriante o de un repartidor.
+ *
+ * Las tiendas de apps exigen que quien creó una cuenta pueda
+ * eliminarla desde la misma app. Lo que hizo —pedidos preparados,
+ * viajes, pagos— es contabilidad de la feria y se queda, pero sin
+ * su nombre ni su teléfono. Con trabajo a medias no se puede: hay un
+ * cliente esperando.
+ */
+export async function eliminarCuentaEquipo(
+  rol: 'feriante' | 'repartidor', actorId: string,
+): Promise<{ eliminada: true }> {
+  return enTransaccion(async () => {
+    const tabla = rol === 'feriante' ? 'feriantes' : 'repartidores';
+    const yo = await consultarUno<Fila>(`SELECT * FROM ${tabla} WHERE id = ? FOR UPDATE`, actorId);
+    if (!yo) throw new ErrorNegocio(404, 'Cuenta no encontrada.');
+
+    if (rol === 'feriante') {
+      const pendiente = await consultarUno<Fila>(
+        `SELECT p.numero FROM sub_pedidos s JOIN pedidos p ON p.id = s.pedido_id
+          WHERE s.feriante_id = ? AND s.estado = 'ACEPTADO' LIMIT 1`, actorId);
+      if (pendiente) {
+        throw new ErrorNegocio(409,
+          `Tienes el pedido #${pendiente.numero} aceptado. Márcalo listo o libéralo antes de eliminar la cuenta.`);
+      }
+      await ejecutar('DELETE FROM feriante_rubros WHERE feriante_id = ?', actorId);
+      await ejecutar(
+        `UPDATE feriantes SET nombre = '(cuenta eliminada)', telefono = ?, puesto = '—',
+                activo = false, conectado = false, push_token = NULL WHERE id = ?`,
+        `eliminado:${actorId}`, actorId);
+    } else {
+      const viaje = await consultarUno<Fila>(
+        `SELECT p.numero FROM viajes v JOIN pedidos p ON p.id = v.pedido_id
+          WHERE v.repartidor_id = ? AND v.estado IN ('ASIGNADO', 'RETIRANDO', 'EN_RUTA') LIMIT 1`, actorId);
+      if (viaje) {
+        throw new ErrorNegocio(409,
+          `Estás llevando el pedido #${viaje.numero}. Termínalo antes de eliminar la cuenta.`);
+      }
+      await ejecutar('DELETE FROM ubicaciones WHERE repartidor_id = ?', actorId);
+      await ejecutar(
+        `UPDATE repartidores SET nombre = '(cuenta eliminada)', telefono = ?,
+                activo = false, conectado = false, push_token = NULL WHERE id = ?`,
+        `eliminado:${actorId}`, actorId);
+    }
+
+    for (const llave of [actorId, yo.telefono].filter(Boolean)) {
+      await ejecutar('DELETE FROM codigos_acceso WHERE telefono = ?', llave);
+      await ejecutar(`DELETE FROM eventos WHERE entidad = 'auth' AND entidad_id = ?`, llave);
+    }
+    await ejecutar('DELETE FROM sesiones WHERE actor_id = ?', actorId);
+    await ejecutar('DELETE FROM aceptaciones WHERE actor_id = ?', actorId);
+    await registrarEvento(rol, actorId, 'cuenta eliminada', {});
+    return { eliminada: true as const };
+  });
+}
