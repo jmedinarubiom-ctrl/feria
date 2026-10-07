@@ -446,6 +446,15 @@ GET('/cliente/pedidos', async (c) => {
   return { pedidos: filas.map((f) => f.id) };
 });
 
+/** El teléfono del comprador, para avisarle cómo va su pedido. */
+POST('/cliente/conexion', async (c) => {
+  const id = await actor(c, 'cliente');
+  const token = c.cuerpo?.pushToken;
+  if (typeof token !== 'string' || token.length > 200) throw new ErrorHttp(422, 'Token inválido.');
+  await ejecutar('UPDATE clientes SET push_token = ? WHERE id = ?', token, id);
+  return { ok: true };
+});
+
 /** Pide ser feriante o repartidor. Lo aprueba el operador. */
 POST('/cliente/postular', async (c) => {
   const id = await actor(c, 'cliente');

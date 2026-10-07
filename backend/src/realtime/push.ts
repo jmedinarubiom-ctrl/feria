@@ -88,7 +88,7 @@ export async function enviarPush(mensajes: MensajePush[]): Promise<{ enviados: n
 }
 
 async function borrarToken(token: string): Promise<void> {
-  for (const tabla of ['feriantes', 'repartidores', 'operadores']) {
+  for (const tabla of ['feriantes', 'repartidores', 'operadores', 'clientes']) {
     await ejecutar(`UPDATE ${tabla} SET push_token = NULL WHERE push_token = ?`, token);
   }
 }
@@ -213,6 +213,35 @@ let enganchado = false;
  * El bus emite después del COMMIT, así que acá los datos ya son
  * visibles y se pueden consultar sin carreras.
  */
+/**
+ * Lo que le importa a quien compró: que su pedido se recibió, que va
+ * en camino, que llegó, o que se canceló. Los pasos internos de la
+ * feria no se le avisan: serían cinco notificaciones por pedido.
+ */
+const PARA_EL_CLIENTE: Record<string, (numero: number) => { title: string; body: string }> = {
+  PAGADO: (n) => ({ title: `Recibimos tu pedido #${n}`, body: 'Ya lo estamos preparando en la feria.' }),
+  EN_RUTA: (n) => ({ title: `Tu pedido #${n} va en camino`, body: 'El repartidor ya salió de la feria.' }),
+  ENTREGADO: (n) => ({ title: `Pedido #${n} entregado`, body: '¡Que lo disfrutes! Gracias por comprar en la feria.' }),
+  CANCELADO: (n) => ({ title: `Tu pedido #${n} se canceló`, body: 'Si ya habías pagado, te devolvemos el dinero.' }),
+};
+
+export async function avisoAlCliente(pedidoId: string, estado: string): Promise<MensajePush | null> {
+  const texto = PARA_EL_CLIENTE[estado];
+  if (!texto) return null;
+  const p = await consultarUno<Fila>(
+    `SELECT p.numero, c.push_token FROM pedidos p JOIN clientes c ON c.id = p.cliente_id
+      WHERE p.id = ?`, pedidoId);
+  if (!p?.push_token) return null;
+  return {
+    to: p.push_token,
+    ...texto(p.numero),
+    sound: 'default',
+    priority: 'high',
+    channelId: 'pedidos',
+    data: { tipo: 'pedido', pedidoId },
+  };
+}
+
 export function iniciarNotificaciones(): void {
   if (enganchado) return;
   enganchado = true;
@@ -227,6 +256,9 @@ export function iniciarNotificaciones(): void {
           await enviarPush(await avisosDeViaje(m));
         } else if (m.tipo === 'autogestion:nueva') {
           await enviarPush(await avisosDeAutogestion(m));
+        } else if (m.tipo === 'pedido:cambio' || m.tipo === 'pedido:cancelado') {
+          const aviso = await avisoAlCliente(m.pedidoId, m.tipo === 'pedido:cancelado' ? 'CANCELADO' : m.estado);
+          if (aviso) await enviarPush([aviso]);
         }
       } catch (e) {
         console.error('[push]', e);

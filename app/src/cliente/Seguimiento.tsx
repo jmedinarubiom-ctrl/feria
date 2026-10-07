@@ -8,6 +8,7 @@ import { Pasos, llamar, EnFeria } from './piezas';
 import { Linea } from './Carrito';
 import { abrirPago } from './Pago';
 import { Icono } from '../iconos';
+import { activarPush } from '../notificaciones';
 
 /**
  * Seguimiento del pedido.
@@ -32,6 +33,12 @@ export default function Seguimiento({
 }) {
   const { datos, cargando, recargar } = useTablero(`/pedidos/${pedidoId}`, 'cliente', pedidoId);
   const [contacto, setContacto] = useState<string | null>(null);
+
+  // El permiso de notificaciones se pide acá, con un pedido ya
+  // hecho: es cuando se entiende para qué sirve («avisarte cuando
+  // salga y cuando llegue»). Pedirlo al abrir la app es pedirlo a
+  // ciegas, y la mayoría dice que no.
+  useEffect(() => { void activarPush('cliente').catch(() => {}); }, []);
   const [pagando, setPagando] = useState(false);
 
   // Quien cerró el navegador sin pagar quedaba acá mirando

@@ -55,6 +55,13 @@ async function crearCanales(): Promise<void> {
     vibrationPattern: [0, 300, 150, 300],
   });
 
+  await Notifications.setNotificationChannelAsync('pedidos', {
+    name: 'Tu pedido',
+    description: 'Cuando tu pedido sale de la feria y cuando llega.',
+    importance: Notifications.AndroidImportance.HIGH,
+    sound: 'default',
+  });
+
   await Notifications.setNotificationChannelAsync('autogestion', {
     name: 'Pedidos sin feriante',
     description: 'Cuando nadie tomó un pedido y lo tienes que comprar tú.',
@@ -109,6 +116,7 @@ export async function activarPush(rol: string): Promise<EstadoPush> {
   const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
   const camino = rol === 'feriante' ? '/feriante/conexion'
     : rol === 'repartidor' ? '/repartidor/conexion'
+    : rol === 'cliente' ? '/cliente/conexion'
     : '/operador/conexion';
 
   // `conectado: true` solo aplica a feriante y repartidor; el
