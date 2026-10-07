@@ -348,6 +348,19 @@ accesibilidad.
 `backend/.env` no está en el repositorio. `backend/.env.example` sí,
 con todo explicado.
 
+## Notificaciones
+
+Avisos push por Expo: feriante (oferta), repartidor (viaje), operador
+(autogestión) y, desde octubre de 2026, el comprador (pedido
+recibido, en camino, entregado, cancelado; `avisoAlCliente` en
+`realtime/push.ts`). En Android pasan por Firebase: proyecto
+`feria-app-e6ce6`, `app/google-services.json` (no es secreto, va en
+el repositorio). Falta, del lado de Juan Manuel, subir la clave de la
+cuenta de servicio (FCM V1) en expo.dev → Credentials → Android: sin
+eso el teléfono se registra pero Expo no puede enviar. No funcionan
+en Expo Go ni en el simulador, solo en una APK instalada. Sin probar
+en un teléfono todavía.
+
 ## Android
 
     cd app && npx eas-cli build --platform android --profile apk

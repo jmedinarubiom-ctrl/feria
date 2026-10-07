@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "735178122049",
+    "project_id": "feria-app-e6ce6",
+    "storage_bucket": "feria-app-e6ce6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:735178122049:android:dd1b195b465bd15713b7c0",
+        "android_client_info": {
+          "package_name": "cl.feria.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA8Zyi9nLeBC_3dUMK7R5kgSxhtuEBdXjk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
