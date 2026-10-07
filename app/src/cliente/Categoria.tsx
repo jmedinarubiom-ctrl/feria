@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, E, R, T, clp } from '../tema';
 import { Cargando, NoCargo } from '../ui';
 import { useRecurso } from './cargar';
-import { MasRedondo, Pildoras } from './piezas';
+import { MasRedondo, Pildoras, EnFeria } from './piezas';
 import { Foto } from '../producto';
 import { simboloProducto } from '../simbolos';
 import { useCliente } from './estado';
@@ -51,7 +51,10 @@ export default function Categoria({
         <Pressable onPress={volver} hitSlop={10} style={e.atras}>
           <Icono nombre="atras" tamano={22} color={C.texto} />
         </Pressable>
-        <Text style={[T.encabezado, { flex: 1 }]}>{nombre}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={T.encabezado}>{nombre}</Text>
+          <EnFeria prefijo="En" />
+        </View>
       </View>
 
       <View style={{ paddingLeft: E.l, paddingBottom: E.m }}>

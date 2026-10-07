@@ -6,7 +6,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { api } from '../api';
 import { C, E, R, T, clp } from '../tema';
 import { Boton, Cargando } from '../ui';
-import { Campo } from './piezas';
+import { Campo, EnFeria } from './piezas';
 import { Linea } from './Carrito';
 import { useCliente, type Perfil } from './estado';
 import PuntoEntrega, { puntoVigente } from './PuntoEntrega';
@@ -112,7 +112,10 @@ export default function Pago({
         <Pressable onPress={volver} hitSlop={10} style={e.atras}>
           <Icono nombre="atras" tamano={22} color={C.texto} />
         </Pressable>
-        <Text style={[T.encabezado, { flex: 1 }]}>Pagar</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={T.encabezado}>Pagar</Text>
+          <EnFeria prefijo="Tu pedido se compra en" />
+        </View>
       </View>
 
       <ScrollView

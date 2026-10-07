@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../api';
 import { C, E, R, T, clp } from '../tema';
 import { Boton, Cargando, Vacio } from '../ui';
-import { Contador } from './piezas';
+import { Contador, EnFeria } from './piezas';
 import { Foto } from '../producto';
 import { simboloProducto } from '../simbolos';
 import { useCliente } from './estado';
@@ -57,7 +57,10 @@ export default function Carrito({
         <Pressable onPress={volver} hitSlop={10} style={e.atras}>
           <Icono nombre="atras" tamano={22} color={C.texto} />
         </Pressable>
-        <Text style={[T.encabezado, { flex: 1 }]}>Tu carrito</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={T.encabezado}>Tu carrito</Text>
+          <EnFeria />
+        </View>
         {unidades > 0 ? (
           <Pressable onPress={vaciar} hitSlop={10}>
             <Text style={[T.micro, { color: C.rojo }]}>Vaciar</Text>

@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { C, E, R, T, clp } from '../tema';
 import { Boton } from '../ui';
-import { Contador } from './piezas';
+import { Contador, EnFeria } from './piezas';
 import { Foto } from '../producto';
 import { simboloProducto } from '../simbolos';
 import { useCliente } from './estado';
@@ -46,7 +46,8 @@ export default function Producto({
         </View>
 
         <View style={e.cuerpo}>
-          <Text style={T.titulo}>{producto.nombre}</Text>
+          <EnFeria prefijo="Disponible en" />
+          <Text style={[T.titulo, { marginTop: E.xs }]}>{producto.nombre}</Text>
           <Text style={[T.cifraMedia, { color: C.verde, marginTop: E.xs }]}>
             {clp(producto.precio_venta)}
             <Text style={T.apoyo}>  {producto.formato}</Text>

@@ -107,7 +107,11 @@ async function itemsDeLaParada(pedidoId: string, subPedidoRef: string) {
 
 /** Vista completa de un pedido: la usan el cliente y el panel del operador. */
 export async function pedidoCompleto(pedidoId: string) {
-  const pedido = await consultarUno<Fila>('SELECT * FROM pedidos WHERE id = ?', pedidoId);
+  // Con el nombre de la feria: el cliente tiene que ver en cada paso
+  // de dónde viene su pedido.
+  const pedido = await consultarUno<Fila>(
+    `SELECT p.*, (SELECT fe.nombre FROM ferias fe WHERE fe.id = p.feria_id) AS feria_nombre
+       FROM pedidos p WHERE p.id = ?`, pedidoId);
   if (!pedido) return null;
 
   const subs = await consultar<Fila>(

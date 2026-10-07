@@ -4,7 +4,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { api, useTablero } from '../api';
 import { C, E, R, T, clp } from '../tema';
 import { Boton, Cargando, Chip, tonoEstado } from '../ui';
-import { Pasos, llamar } from './piezas';
+import { Pasos, llamar, EnFeria } from './piezas';
 import { Linea } from './Carrito';
 import { abrirPago } from './Pago';
 import { Icono } from '../iconos';
@@ -69,7 +69,11 @@ export default function Seguimiento({
         <Pressable onPress={volver} hitSlop={10} style={e.atras}>
           <Icono nombre="atras" tamano={22} color={C.texto} />
         </Pressable>
-        <Text style={[T.encabezado, { flex: 1 }]}>Pedido #{datos.numero}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={T.encabezado}>Pedido #{datos.numero}</Text>
+          {/* La feria del pedido, no la elegida hoy: pueden no coincidir. */}
+          <EnFeria nombre={datos.feria_nombre} prefijo="Desde" />
+        </View>
         <Chip texto={datos.estado.replace(/_/g, ' ')} tono={tonoEstado(datos.estado)} />
       </View>
 

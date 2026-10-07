@@ -102,18 +102,29 @@ export default function Inicio({ navegar }: { navegar: (p: string, args?: any) =
       ) : null}
 
       {/* Portada */}
-      <View style={e.portada}>
+      {/* La portada dice en qué feria se está comprando: es lo
+          primero que hay que saber antes de armar el pedido. */}
+      <Pressable onPress={() => navegar('Feria')} style={e.portada}>
         <Image
           source={require('../../assets/logo-marca.png')}
           style={e.portadaManzana}
           resizeMode="contain"
           accessibilityIgnoresInvertColors
         />
-        <Text style={[T.encabezado, { color: '#FFFFFF' }]}>Productos frescos de la feria</Text>
-        <Text style={[T.apoyo, { color: 'rgba(255,255,255,0.85)' }]}>
-          Precio fijo, sin importar el puesto
+        <Text style={[T.micro, e.portadaSobre]}>Estás comprando en</Text>
+        <Text style={[T.titulo, { color: '#FFFFFF', fontSize: 22 }]} numberOfLines={2}>
+          {feria?.nombre ?? 'Tu feria'}
         </Text>
-      </View>
+        <View style={e.portadaPie}>
+          <View style={[e.portadaEstado, !feria?.aceptandoPedidos && { backgroundColor: C.ambar }]} />
+          <Text style={[T.apoyo, { color: 'rgba(255,255,255,0.9)', flex: 1 }]} numberOfLines={1}>
+            {feria
+              ? `${feria.comuna ? feria.comuna + ' · ' : ''}${feria.aceptandoPedidos ? 'Abierta ahora' : 'Cerrada ahora'}`
+              : 'Cargando…'}
+          </Text>
+          <Text style={[T.micro, e.portadaCambiar]}>Cambiar</Text>
+        </View>
+      </Pressable>
 
       <Text style={[T.seccion, { marginBottom: E.m }]}>Rubros</Text>
       <ScrollView
@@ -162,29 +173,6 @@ export default function Inicio({ navegar }: { navegar: (p: string, args?: any) =
           </ScrollView>
         </>
       ) : null}
-
-      <Text style={[T.seccion, { marginBottom: E.m }]}>Tu feria</Text>
-      <Pressable onPress={() => navegar('Feria')} style={e.tarjetaFeria}>
-        <View style={e.miniFoto}>
-          <Image
-            source={require('../../assets/logo-marca.png')}
-            style={{ width: 34, height: 34 }}
-            resizeMode="contain"
-            accessibilityIgnoresInvertColors
-          />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={T.encabezado}>{feria?.nombre ?? 'Tu feria'}</Text>
-          <Text style={[T.micro, {
-            color: feria?.aceptandoPedidos ? C.verde : C.naranja,
-          }]}>
-            {feria
-              ? feria.aceptandoPedidos ? 'Abierta ahora' : 'Cerrada'
-              : '…'}
-          </Text>
-        </View>
-        <Icono nombre="adelante" tamano={20} color={C.textoSuave} />
-      </Pressable>
     </ScrollView>
   );
 }
@@ -232,6 +220,14 @@ const e = StyleSheet.create({
   portada: {
     backgroundColor: C.verde, borderRadius: R.enorme,
     padding: E.xl, marginBottom: E.xl, overflow: 'hidden',
+  },
+  portadaSobre: { color: 'rgba(255,255,255,0.8)', letterSpacing: 0.4, textTransform: 'uppercase' },
+  portadaPie: { flexDirection: 'row', alignItems: 'center', gap: E.s, marginTop: E.s },
+  portadaEstado: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#7BE0A6' },
+  portadaCambiar: {
+    color: '#FFFFFF', fontFamily: T.destacado.fontFamily, overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.18)', paddingHorizontal: E.m, paddingVertical: 4,
+    borderRadius: R.pastilla,
   },
   portadaManzana: {
     position: 'absolute', right: -24, top: -18,

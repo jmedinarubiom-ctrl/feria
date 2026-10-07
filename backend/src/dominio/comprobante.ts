@@ -16,7 +16,8 @@ const limpio = (t: unknown): string =>
 
 export async function enviarComprobante(pedidoId: string): Promise<boolean> {
   const pedido = await consultarUno<Fila>(
-    `SELECT p.*, c.correo_ingreso, c.email AS correo_perfil
+    `SELECT p.*, c.correo_ingreso, c.email AS correo_perfil,
+            (SELECT fe.nombre FROM ferias fe WHERE fe.id = p.feria_id) AS feria_nombre
        FROM pedidos p LEFT JOIN clientes c ON c.id = p.cliente_id
       WHERE p.id = ?`, pedidoId);
   if (!pedido) return false;
@@ -37,7 +38,8 @@ export async function enviarComprobante(pedidoId: string): Promise<boolean> {
   const lineas = items.map((i) =>
     `${i.cantidad} × ${i.nombre} (${i.formato}) — ${plata(i.cantidad * i.precio_venta)}`);
   const texto = [
-    `Hola ${pedido.cliente_nombre}, recibimos el pago de tu pedido #${pedido.numero}.`,
+    `Hola ${pedido.cliente_nombre}, recibimos el pago de tu pedido #${pedido.numero}`
+      + (pedido.feria_nombre ? ` en ${pedido.feria_nombre}.` : '.'),
     '',
     ...lineas,
     '',
@@ -54,7 +56,7 @@ export async function enviarComprobante(pedidoId: string): Promise<boolean> {
   ].join('\n');
 
   const html = plantillaCorreo(`    <h2 style="margin:0 0 4px;font-size:20px">Pedido #${pedido.numero}</h2>
-    <p style="color:#6B7670;margin:0 0 16px;font-size:15px">Hola ${limpio(pedido.cliente_nombre)}, recibimos tu pago.</p>
+    <p style="color:#6B7670;margin:0 0 16px;font-size:15px">Hola ${limpio(pedido.cliente_nombre)}, recibimos tu pago.${pedido.feria_nombre ? ` Lo compramos en <b>${limpio(pedido.feria_nombre)}</b>.` : ''}</p>
     <table style="width:100%;border-collapse:collapse;font-size:15px">
 ${items.map((i) => `<tr><td style="padding:8px 0;border-bottom:1px solid #EDEFED">${i.cantidad} × ${limpio(i.nombre)} <span style="color:#6B7670">(${limpio(i.formato)})</span></td><td style="padding:8px 0;border-bottom:1px solid #EDEFED;text-align:right;white-space:nowrap">${plata(i.cantidad * i.precio_venta)}</td></tr>`).join('\n')}
     <tr><td style="padding:8px 0;color:#6B7670">Despacho</td><td style="text-align:right;color:#6B7670">${plata(pedido.costo_despacho)}</td></tr>

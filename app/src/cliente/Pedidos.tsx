@@ -89,6 +89,11 @@ function Tarjeta({ pedido, navegar }: {
         <Text style={T.destacado}>Pedido #{pedido.numero}</Text>
         <Chip texto={pedido.estado.replace(/_/g, ' ')} tono={tonoEstado(pedido.estado)} />
       </View>
+      {pedido.feria_nombre ? (
+        <Text style={[T.micro, { marginTop: 2, color: C.verdeOscuro }]} numberOfLines={1}>
+          {pedido.feria_nombre}
+        </Text>
+      ) : null}
       <Text style={[T.micro, { marginTop: 2 }]} numberOfLines={1}>{pedido.direccion}</Text>
       <View style={[e.entre, { marginTop: E.s }]}>
         <Text style={T.apoyo}>

@@ -7,6 +7,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { C, E, FUENTES, R, T } from '../tema';
+import { Icono } from '../iconos';
+import { useRecurso } from './cargar';
+import { useCliente } from './estado';
 
 /**
  * Alto de la barra de pestañas sin el margen del indicador de inicio.
@@ -183,6 +186,7 @@ export function Pasos({ pasos, actual }: { pasos: string[]; actual: number }) {
 }
 
 const e = StyleSheet.create({
+  enFeria: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   fila: { flexDirection: 'row', alignItems: 'center', gap: 3 },
 
   contador: {
@@ -227,3 +231,42 @@ const e = StyleSheet.create({
   },
   tilde: { color: '#FFFFFF', fontSize: 12, lineHeight: 14 },
 });
+
+/**
+ * En qué feria se está comprando.
+ *
+ * El pedido sale de una feria concreta, con su horario y sus
+ * puestos. Si eso no está a la vista en cada paso, alguien termina
+ * pidiendo a una feria que no es la suya y se entera al pagar.
+ */
+export function useFeriaActual() {
+  const { feriaId } = useCliente();
+  const { datos } = useRecurso<any>(`/feria/estado?feria=${encodeURIComponent(feriaId)}`);
+  return datos as null | {
+    id: string; nombre: string; comuna?: string; aceptandoPedidos?: boolean;
+  };
+}
+
+/** La feria en una línea: va bajo el título de cada paso de la compra. */
+export function EnFeria({ nombre, prefijo = 'Comprando en', onPress, claro }: {
+  /** Si no viene, se usa la feria elegida. */
+  nombre?: string | null;
+  prefijo?: string;
+  onPress?: () => void;
+  /** Sobre un fondo oscuro. */
+  claro?: boolean;
+}) {
+  const actual = useFeriaActual();
+  const texto = nombre ?? actual?.nombre;
+  if (!texto) return null;
+  const color = claro ? '#FFFFFF' : C.verdeOscuro;
+  const fila = (
+    <View style={e.enFeria}>
+      <Icono nombre="feria" tamano={15} color={color} />
+      <Text style={[T.micro, { color, flexShrink: 1 }]} numberOfLines={1}>
+        {prefijo} <Text style={{ fontFamily: T.destacado.fontFamily, color }}>{texto}</Text>
+      </Text>
+    </View>
+  );
+  return onPress ? <Pressable onPress={onPress} hitSlop={8}>{fila}</Pressable> : fila;
+}
