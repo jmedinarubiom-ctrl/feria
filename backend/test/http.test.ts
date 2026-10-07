@@ -246,8 +246,9 @@ test('con su sesión, el operador recibe los avisos', async () => {
   await new Promise((r) => setTimeout(r, 100));
 
   const aviso = new Promise<any>((r) => ws.once('message', (d) => r(JSON.parse(String(d)))));
-  const { json: creado } = await pedir('POST', '/pedidos', PEDIDO, await entrar(CLIENTA));
-  const pago = await pedir('POST', '/pagos/iniciar', { pedidoId: creado.pedidoId });
+  const clienta = await entrar(CLIENTA);
+  const { json: creado } = await pedir('POST', '/pedidos', PEDIDO, clienta);
+  const pago = await pedir('POST', '/pagos/iniciar', { pedidoId: creado.pedidoId }, clienta);
   await pedir('POST', `/dev/pagar/${pago.json.pagoId}`);
 
   const m = await aviso;
@@ -391,7 +392,7 @@ test('el repartidor ve si el punto es exacto o aproximado', async () => {
   const token = await entrar(CLIENTA);
   const r = await pedir('POST', '/pedidos',
     { ...PEDIDO, puntoMarcado: true, lat: -33.0472, lng: -71.6127, precisionM: 5 }, token);
-  const pago = await pedir('POST', '/pagos/iniciar', { pedidoId: r.json.pedidoId });
+  const pago = await pedir('POST', '/pagos/iniciar', { pedidoId: r.json.pedidoId }, token);
   await pedir('POST', `/dev/pagar/${pago.json.pagoId}`);
 
   const jose = await entrar('+56911111111');

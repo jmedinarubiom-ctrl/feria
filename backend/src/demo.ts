@@ -87,7 +87,7 @@ linea(`Pedido #${pedido.numero} creado.`);
 
 // El pedido no sale a la feria hasta que se paga. Acá no hay
 // pasarela: se confirma con la ruta de desarrollo.
-const pago = await api('POST', '/pagos/iniciar', { cuerpo: { pedidoId: pedido.pedidoId } });
+const pago = await api('POST', '/pagos/iniciar', { actor: 'cliente', cuerpo: { pedidoId: pedido.pedidoId } });
 if (pago.pagoId) await api('POST', `/dev/pagar/${pago.pagoId}`);
 linea('Pagado: recién ahora se le ofrece a los feriantes.');
 

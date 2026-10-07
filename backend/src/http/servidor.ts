@@ -616,10 +616,34 @@ async function pedidoPorNumero(valor: string) {
 // ============================================================
 
 /** Arranca el cobro y devuelve la URL de la pasarela. */
-POST('/pagos/iniciar', async (c) =>
-  iniciarPago(String(c.cuerpo?.pedidoId ?? ''), String(c.cuerpo?.email ?? 'sin@correo.cl')));
+/**
+ * El pago de un pedido es cosa de quien lo hizo y del operador.
+ *
+ * Estas rutas estaban abiertas: cualquiera que supiera el id de un
+ * pedido podía iniciar su cobro —y con eso dejarle anotado su propio
+ * correo para un eventual reembolso— o ver sus pagos. El id no se
+ * adivina, pero «no se adivina» no es un permiso.
+ */
+async function exigirPedidoPropio(c: Ctx, pedidoId: string): Promise<void> {
+  const yo = await identidad(c);
+  if (yo.rol === 'operador') return;
+  const p = await consultarUno<Fila>('SELECT cliente_id FROM pedidos WHERE id = ?', pedidoId);
+  // El mismo 404 para «no existe» y «no es tuyo».
+  if (!p || yo.rol !== 'cliente' || p.cliente_id !== yo.actorId) {
+    throw new ErrorHttp(404, 'Pedido no encontrado.');
+  }
+}
 
-GET('/pagos/pedido/:id', async (c) => ({ pagos: await pagosDe(c.params.id) }));
+POST('/pagos/iniciar', async (c) => {
+  const pedidoId = String(c.cuerpo?.pedidoId ?? '');
+  await exigirPedidoPropio(c, pedidoId);
+  return iniciarPago(pedidoId, String(c.cuerpo?.email ?? 'sin@correo.cl'));
+});
+
+GET('/pagos/pedido/:id', async (c) => {
+  await exigirPedidoPropio(c, c.params.id);
+  return { pagos: await pagosDe(c.params.id) };
+});
 
 /**
  * «¿Ya llegó mi pago?»
@@ -629,7 +653,11 @@ GET('/pagos/pedido/:id', async (c) => ({ pagos: await pagosDe(c.params.id) }));
  * corresponde, así el cliente no se queda mirando una pantalla que
  * dice «esperando el pago» con la plata ya descontada.
  */
-POST('/pagos/:pagoId/revisar', async (c) => revisarCobro(c.params.pagoId));
+POST('/pagos/:pagoId/revisar', async (c) => {
+  const pago = await consultarUno<Fila>('SELECT pedido_id FROM pagos WHERE id = ?', c.params.pagoId);
+  await exigirPedidoPropio(c, pago?.pedido_id ?? '');
+  return revisarCobro(c.params.pagoId);
+});
 
 /**
  * Mercado Pago avisa acá.

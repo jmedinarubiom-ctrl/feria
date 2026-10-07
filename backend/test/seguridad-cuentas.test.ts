@@ -239,7 +239,7 @@ test('el WebSocket acepta el token en el primer mensaje, no en la dirección', a
     clienteNombre: 'Camila', direccion: 'Subida Ecuador 123', lat: -33.04, lng: -71.61,
     items: [{ productoId: 'p-tomate', cantidad: 4 }],
   }, cliente.token);
-  const pago = await pedir('POST', '/pagos/iniciar', { pedidoId: p.json.pedidoId });
+  const pago = await pedir('POST', '/pagos/iniciar', { pedidoId: p.json.pedidoId }, cliente.token);
   await pedir('POST', `/dev/pagar/${pago.json.pagoId}`);
   assert.equal((await aviso).pedidoId, p.json.pedidoId);
   ws.close();
