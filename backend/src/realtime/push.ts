@@ -256,8 +256,10 @@ export function iniciarNotificaciones(): void {
           await enviarPush(await avisosDeViaje(m));
         } else if (m.tipo === 'autogestion:nueva') {
           await enviarPush(await avisosDeAutogestion(m));
-        } else if (m.tipo === 'pedido:cambio' || m.tipo === 'pedido:cancelado') {
-          const aviso = await avisoAlCliente(m.pedidoId, m.tipo === 'pedido:cancelado' ? 'CANCELADO' : m.estado);
+        } else if (m.tipo === 'pedido:cambio') {
+          // La cancelación también llega como `pedido:cambio`: mirar
+          // además `pedido:cancelado` mandaría el aviso dos veces.
+          const aviso = await avisoAlCliente(m.pedidoId, m.estado);
           if (aviso) await enviarPush([aviso]);
         }
       } catch (e) {
