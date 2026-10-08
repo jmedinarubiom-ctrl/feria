@@ -133,6 +133,51 @@ for (let i0 = 0; i0 < W * H; i0++) {
   if (maxY < limiteHoja) { for (const i of mancha) et[i] = -1; quitados += mancha.length; }
 }
 
+// ---------- el resto del blanco ----------
+// Sobre un fondo de color, lo blanco se ve como un parche. Cada
+// mancha blanca que queda se resuelve mirando qué la rodea:
+//  · encerrada por la letra (el hueco de la «a», la «e», la «p»):
+//    pasa a transparente, como la hoja;
+//  · dentro del dibujo (el brillo del limón, la punta del rábano):
+//    toma un tono claro del color que tiene al lado.
+{
+  const esMarca = (i) => i >= 0 && centros[i][0] === MARCA[0] && centros[i][1] === MARCA[1] && centros[i][2] === MARCA[2];
+  const luzDe = (c) => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
+  const v = new Uint8Array(W * H);
+  let huecos = 0, tenidas = 0;
+  for (let i0 = 0; i0 < W * H; i0++) {
+    if (v[i0] || !blancos.has(et[i0])) continue;
+    const pila = [i0], mancha = [], vecinos = new Map(); v[i0] = 1;
+    let afuera = false;
+    while (pila.length) {
+      const i = pila.pop(); mancha.push(i);
+      const x = i % W, y = (i / W) | 0;
+      for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, y > 0 ? i - W : -1, y < H - 1 ? i + W : -1]) {
+        if (j < 0) { afuera = true; continue; }
+        const e = et[j];
+        if (blancos.has(e)) { if (!v[j]) { v[j] = 1; pila.push(j); } }
+        else if (e < 0) afuera = true;
+        else vecinos.set(e, (vecinos.get(e) ?? 0) + 1);
+      }
+    }
+    // El contorno burdeo rodea casi todo: no dice de qué color es la zona.
+    const orden = [...vecinos.entries()].filter(([e]) => !esMarca(e)).sort((a, b) => b[1] - a[1]);
+    const vecino = orden[0]?.[0];
+    if (afuera || vecino === undefined || luzDe(centros[vecino]) < 70) {
+      for (const i of mancha) et[i] = -1;
+      huecos++;
+      continue;
+    }
+    const base = centros[vecino];
+    const claro = base.map((c) => Math.round(c * 0.38 + 255 * 0.62));
+    let idx = centros.findIndex((c) => c[0] === claro[0] && c[1] === claro[1] && c[2] === claro[2]);
+    if (idx < 0) { centros.push(claro); idx = centros.length - 1; }
+    for (const i of mancha) et[i] = idx;
+    tenidas++;
+  }
+  console.log(`blanco restante: ${huecos} huecos transparentes, ${tenidas} zonas con color`);
+}
+
 // ---------- bordes contra el vacío ----------
 // Donde un color toca el blanco o lo transparente, el suavizado del
 // original dejó una franja de un tono más claro. Esos puntos toman
