@@ -72,7 +72,11 @@ export default function IngresoExterno(props: Props) {
   // salvo que el servidor diga expresamente que no lo tiene. Que el
   // servidor no conteste no lo esconde: al tocarlo se ve el error.
   const conGoogle = !!idDeEstaPlataforma && metodos.google !== false;
-  const conApple = !!metodos.apple && hayApple;
+  // Lo mismo con Apple: en un iPhone se muestra salvo que el servidor
+  // diga que no lo tiene. Antes, si el servidor no contestaba —el
+  // teléfono apuntando a una dirección vieja— el botón desaparecía
+  // sin ninguna pista de por qué.
+  const conApple = hayApple && metodos.apple !== false;
   if (!conGoogle && !conApple) return null;
 
   return (
