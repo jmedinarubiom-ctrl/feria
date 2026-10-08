@@ -26,22 +26,6 @@ type Proveedor = {
 const lista = (v: string | undefined): string[] =>
   (v ?? '').split(',').map((x) => x.trim()).filter(Boolean);
 
-/**
- * Probar «Iniciar sesión con Apple» desde Expo Go.
- *
- * Dentro de Expo Go, Apple firma el permiso a nombre de Expo Go
- * (`host.exp.Exponent`), no de nuestra app, y el servidor lo rechaza
- * con razón. Para poder probar antes de tener la app compilada se
- * acepta también ese nombre, pero SOLO en el servidor de desarrollo
- * del computador: cualquier otra app abierta en Expo Go obtiene
- * permisos con ese mismo nombre, así que en un servidor expuesto a
- * internet sería una puerta falsa.
- */
-const deExpoGo = (): string[] =>
-  process.env.NODE_ENV !== 'production' && process.env.FERIA_EXPUESTA !== '1'
-    && lista(process.env.APPLE_CLIENT_IDS).length > 0
-    ? ['host.exp.Exponent'] : [];
-
 const PROVEEDORES: Record<IdentidadExterna['proveedor'], Proveedor> = {
   google: {
     emisores: ['https://accounts.google.com', 'accounts.google.com'],
@@ -53,7 +37,7 @@ const PROVEEDORES: Record<IdentidadExterna['proveedor'], Proveedor> = {
     emisores: ['https://appleid.apple.com'],
     urlLlaves: 'https://appleid.apple.com/auth/keys',
     // El identificador de la app (cl.feria.app).
-    audiencias: () => [...lista(process.env.APPLE_CLIENT_IDS), ...deExpoGo()],
+    audiencias: () => lista(process.env.APPLE_CLIENT_IDS),
   },
 };
 

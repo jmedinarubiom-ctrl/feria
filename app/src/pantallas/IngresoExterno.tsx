@@ -64,6 +64,8 @@ export default function IngresoExterno(props: Props) {
 
   useEffect(() => {
     if (Platform.OS === 'ios') {
+      // En Expo Go esto da siempre «false»: Expo Go no trae el módulo
+      // de Apple. El botón solo existe en la app compilada.
       AppleAuthentication.isAvailableAsync().then(setHayApple).catch(() => {});
     }
   }, []);

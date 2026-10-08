@@ -373,6 +373,10 @@ ficha y las notas para la revisión. Lo que hay en el código:
   Las cuentas que se vacían solas por inactividad no revocan.
 - `APPLE_CLIENT_IDS=cl.feria.app`; falta el cliente de Google para
   iOS (`EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`).
+- **«Iniciar sesión con Apple» no se puede probar en Expo Go**: Expo
+  Go (SDK 57) no trae el módulo nativo y `isAvailableAsync()` da
+  siempre false, en simulador y en iPhone. Solo existe en la app
+  compilada con la cuenta de desarrollador.
 - Falta la cuenta Apple Developer de Juan Manuel: sin ella no se
   compila para iPhone ni se probó «Iniciar sesión con Apple».
 
