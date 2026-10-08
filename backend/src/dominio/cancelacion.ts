@@ -159,6 +159,16 @@ export async function cancelarPedido(datos: Cancelacion): Promise<ResultadoCance
   };
 }
 
+/**
+ * Devuelve una parte de lo pagado sin cancelar el pedido: un
+ * producto que faltó, una compensación del operador.
+ */
+export async function reembolsarParte(pedidoId: string, monto: number, motivo: string) {
+  const pedido = await consultarUno<Fila>('SELECT * FROM pedidos WHERE id = ?', pedidoId);
+  if (!pedido) return { monto: 0, solicitado: false, motivo: 'pedido inexistente' };
+  return pedirReembolso(pedido, monto, motivo);
+}
+
 async function pedirReembolso(pedido: Fila, monto: number | undefined, motivo: string) {
   const pago = await consultarUno<Fila>(
     `SELECT * FROM pagos WHERE pedido_id = ? AND estado = 'PAGADO'`, pedido.id);
@@ -181,7 +191,7 @@ async function pedirReembolso(pedido: Fila, monto: number | undefined, motivo: s
     // Sin pasarela real (desarrollo) se anota igual, para que la
     // contabilidad del día cuadre.
     await ejecutar(
-      'UPDATE pagos SET monto_reembolsado = ?, reembolsado_at = ? WHERE id = ?',
+      'UPDATE pagos SET monto_reembolsado = monto_reembolsado + ?, reembolsado_at = ? WHERE id = ?',
       aDevolver, ahora(), pago.id);
     await registrarEvento('pago', pago.id, 'reembolso anotado (sin pasarela)',
       { monto: aDevolver, motivo });
@@ -199,7 +209,7 @@ async function pedirReembolso(pedido: Fila, monto: number | undefined, motivo: s
     if (!r.aceptado) throw new Error(`${via.nombre} rechazó el reembolso.`);
 
     await ejecutar(
-      'UPDATE pagos SET monto_reembolsado = ?, reembolsado_at = ? WHERE id = ?',
+      'UPDATE pagos SET monto_reembolsado = monto_reembolsado + ?, reembolsado_at = ? WHERE id = ?',
       aDevolver, ahora(), pago.id);
     await registrarEvento('pago', pago.id, 'reembolso solicitado',
       { monto: aDevolver, referencia: r.referencia, pasarela: via.nombre, motivo });

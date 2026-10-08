@@ -7,7 +7,8 @@ import { limpiarYSembrar, pedidoPagado } from './ayuda.ts';
 import {
   crearPedido, cotizar, calcularDespacho, aceptarOferta, marcarListo, PedidoMuyChico,
 } from '../src/dominio/despacho.ts';
-import { aceptarViaje, completarParada } from '../src/dominio/reparto.ts';
+import { aceptarViaje } from '../src/dominio/reparto.ts';
+import { completarParada } from './ayuda.ts';
 import { metricas } from '../src/dominio/consultas.ts';
 import { CONFIG } from '../src/config.ts';
 

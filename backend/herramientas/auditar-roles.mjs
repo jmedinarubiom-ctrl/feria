@@ -180,10 +180,20 @@ const paradaAjena = await pedir('POST', `/paradas/${paradas[0].id}/completar`, {
 ok(paradaAjena.estado >= 400, 'otro repartidor no puede completar paradas de este viaje', `respondió ${paradaAjena.estado}`);
 const saltarse = await pedir('POST', `/paradas/${paradas[paradas.length - 1].id}/completar`, { token: diego.token });
 ok(saltarse.estado >= 400, 'no se puede marcar la entrega antes de retirar', `respondió ${saltarse.estado}`);
-for (const p of paradas) {
+const codigoEntrega = (await pedir('GET', `/pedidos/${pedidoId}`, { token: ana.token })).datos.codigo_entrega;
+ok(/^\d{4}$/.test(String(codigoEntrega)), 'el comprador ve su código de entrega');
+ok(!contiene(ruta, 'codigo_entrega'), 'el repartidor no ve el código: se lo tiene que pedir al cliente');
+for (const p of paradas.slice(0, -1)) {
   const r = await pedir('POST', `/paradas/${p.id}/completar`, { token: diego.token });
   if (r.estado !== 200) ok(false, `completar la parada ${p.orden ?? ''}`, JSON.stringify(r.datos).slice(0, 100));
 }
+const ultima = paradas[paradas.length - 1];
+const sinCodigo = await pedir('POST', `/paradas/${ultima.id}/completar`, { token: diego.token });
+ok(sinCodigo.estado === 422, 'sin el código no se puede marcar entregado', `respondió ${sinCodigo.estado}`);
+const codigoMalo = await pedir('POST', `/paradas/${ultima.id}/completar`, { token: diego.token, cuerpo: { codigo: codigoEntrega === '0000' ? '1111' : '0000' } });
+ok(codigoMalo.estado === 422, 'con un código inventado tampoco', `respondió ${codigoMalo.estado}`);
+const conCodigo = await pedir('POST', `/paradas/${ultima.id}/completar`, { token: diego.token, cuerpo: { codigo: codigoEntrega } });
+ok(conCodigo.estado === 200, 'con el código del cliente, entrega', JSON.stringify(conCodigo.datos).slice(0, 100));
 vista = (await pedir('GET', `/pedidos/${pedidoId}`, { token: ana.token })).datos;
 ok(vista.estado === 'ENTREGADO', 'el comprador ve su pedido entregado', vista.estado);
 

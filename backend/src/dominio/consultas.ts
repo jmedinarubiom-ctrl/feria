@@ -2,6 +2,7 @@ import { consultar, consultarUno, type Fila } from '../db/index.ts';
 import { EstadoSubPedido, EstadoViaje } from './estados.ts';
 import { CONFIG } from '../config.ts';
 import { hoy } from './liquidaciones.ts';
+import { estimarLlegada } from './mejoras.ts';
 
 const diaDe = (col: string) => `(${col} AT TIME ZONE '${CONFIG.zonaHoraria}')::date`;
 
@@ -123,12 +124,20 @@ export async function pedidoCompleto(pedidoId: string) {
     pedidoId);
 
   const viaje = await consultarUno<Fila>(
-    `SELECT v.*, rp.nombre AS repartidor_nombre, rp.lat, rp.lng, rp.vehiculo
+    `SELECT v.*, rp.nombre AS repartidor_nombre, rp.telefono AS repartidor_telefono,
+            rp.lat, rp.lng, rp.vehiculo,
+            (SELECT COUNT(*)::int FROM paradas pa
+              WHERE pa.viaje_id = v.id AND pa.tipo = 'RETIRO' AND pa.completada_at IS NULL) AS retiros_pendientes
        FROM viajes v LEFT JOIN repartidores rp ON rp.id = v.repartidor_id
       WHERE v.pedido_id = ? AND v.estado <> ?`,
     pedidoId, EstadoViaje.CANCELADO);
 
-  return { ...pedido, subPedidos: await conItems(subs), viaje: viaje ?? null };
+  const calificacion = await consultarUno<Fila>(
+    'SELECT estrellas, comentario FROM calificaciones WHERE pedido_id = ?', pedidoId);
+  const conEta = viaje
+    ? { ...viaje, eta_minutos: estimarLlegada(pedido, viaje, viaje.retiros_pendientes ?? 0) }
+    : null;
+  return { ...pedido, subPedidos: await conItems(subs), viaje: conEta, calificacion: calificacion ?? null };
 }
 
 /** La cola del operador: todo lo que nadie aceptó y hay que ir a comprar. */

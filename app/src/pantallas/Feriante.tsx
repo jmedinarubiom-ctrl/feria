@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, StyleSheet, Switch, Text, View, Vibration } from 'react-native';
+import { Alert, StyleSheet, Switch, Text, View, Vibration, Pressable } from 'react-native';
 
 import { api, useTablero, usarCuentaRegresiva } from '../api';
 import { C, E, R, T, clp } from '../tema';
@@ -111,6 +111,23 @@ export default function Feriante({ ferianteId }: { ferianteId: string }) {
         ) : null}
       </Tarjeta>
 
+      {/* Pagos de otros días que faltó confirmar: antes solo se
+          podía confirmar el de hoy. */}
+      {(datos.pagosPorConfirmar ?? []).filter((p: any) => p.fecha !== liquidacion.fecha).map((p: any) => (
+        <Tarjeta key={p.fecha} style={{ marginBottom: E.m }}>
+          <Text style={T.seccion}>Pago del {p.fecha.split('-').reverse().slice(0, 2).join('/')}</Text>
+          <Text style={[T.apoyo, { marginTop: 2, marginBottom: E.s }]}>
+            La operación anotó que te pagó {clp(p.monto)}. Confírmalo si lo recibiste.
+          </Text>
+          <Boton
+            titulo={`RECIBÍ ${clp(p.monto)}`}
+            variante="secundario"
+            onPress={() => accion(() => api('POST', '/feriante/liquidacion/confirmar', { cuerpo: { fecha: p.fecha } }))}
+            deshabilitado={ocupado}
+          />
+        </Tarjeta>
+      ))}
+
       <Seccion titulo="Pedidos que tomaste">
         {trabajo.length === 0 ? (
           <Vacio texto={feriante.conectado
@@ -128,10 +145,30 @@ export default function Feriante({ ferianteId }: { ferianteId: string }) {
               </View>
 
               {s.items.map((i2: any) => (
-                <Text key={i2.id} style={[T.cuerpo, { marginTop: 2 }]}>
-                  {i2.cantidad}× {i2.nombre}{'  '}
-                  <Text style={T.apoyo}>{i2.formato}</Text>
-                </Text>
+                <View key={i2.id} style={e.filaItem}>
+                  <Text style={[T.cuerpo, { flex: 1 }, i2.faltante && e.tachado]}>
+                    {i2.cantidad}× {i2.nombre}{'  '}
+                    <Text style={T.apoyo}>{i2.faltante ? 'no lo tenías' : i2.formato}</Text>
+                  </Text>
+                  {/* Faltó un producto: se saca del pedido en vez de
+                      rechazarlo entero. Solo mientras se prepara. */}
+                  {s.estado === 'ACEPTADO' && !i2.faltante && s.items.filter((x: any) => !x.faltante).length > 1 ? (
+                    <Pressable
+                      hitSlop={8}
+                      disabled={ocupado}
+                      onPress={() => Alert.alert(
+                        `¿No tienes ${i2.nombre.toLowerCase()}?`,
+                        'Se saca del pedido: no se te paga ese producto y al cliente se le devuelve la plata.',
+                        [
+                          { text: 'Cancelar', style: 'cancel' },
+                          { text: 'No tengo', style: 'destructive',
+                            onPress: () => void accion(() => api('POST', `/items/${i2.id}/faltante`)) },
+                        ])}
+                    >
+                      <Text style={[T.micro, { color: C.naranja, fontFamily: T.destacado.fontFamily }]}>No tengo</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
               ))}
 
               <Text style={[T.cifraChica, { color: C.verdeOscuro, marginTop: E.s }]}>
@@ -227,6 +264,8 @@ function OfertaEntrante({
 }
 
 const e = StyleSheet.create({
+  filaItem: { flexDirection: 'row', alignItems: 'center', gap: E.s, marginTop: 2 },
+  tachado: { textDecorationLine: 'line-through', color: C.textoSuave },
   interruptor: {
     flexDirection: 'row', alignItems: 'center', gap: E.m,
     backgroundColor: C.superficie, borderRadius: R.grande,

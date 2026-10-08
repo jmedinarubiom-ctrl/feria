@@ -172,7 +172,7 @@ export const CONFIG = {
    * app le vuelve a pedir la aceptación a todos.
    */
   legal: {
-    version: process.env.LEGAL_VERSION ?? '2026-10-06',
+    version: process.env.LEGAL_VERSION ?? '2026-10-08',
     /**
      * Quién es el proveedor. La ley del consumidor y el reglamento
      * de comercio electrónico obligan a identificarlo: razón social,

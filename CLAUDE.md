@@ -35,7 +35,7 @@ nunca voseo rioplatense).
     ./feria.sh               # backend + túnel público (desde cualquier red)
     ./respaldar.sh           # respaldo de base y fotos (con RESPALDO_CLAVE sale cifrado)
 
-    cd backend && npm test   # 279 pruebas (6 de carreras se saltan sin Postgres)
+    cd backend && npm test   # 304 pruebas (6 de carreras se saltan sin Postgres)
     cd backend && DATABASE_URL=… npm run test:postgres   # todas, contra Postgres real. VACÍA esa base.
     cd app && npx tsc --noEmit
 
@@ -379,6 +379,44 @@ ficha y las notas para la revisión. Lo que hay en el código:
   compilada con la cuenta de desarrollador.
 - Falta la cuenta Apple Developer de Juan Manuel: sin ella no se
   compila para iPhone ni se probó «Iniciar sesión con Apple».
+
+## Reparto confiable (8 de octubre de 2026)
+
+Mejoras al tramo pedido → feriante → repartidor (`dominio/mejoras.ts`,
+migración 017, `test/reparto-confiable.test.ts`):
+
+- **Código de entrega**: cada pedido nace con 4 dígitos
+  (`pedidos.codigo_entrega`) que el cliente ve en el seguimiento y el
+  repartidor tiene que escribir para marcar «entregado». Si no hay a
+  quién pedírselo, escribe a quién lo dejó (`entrega_sin_codigo`) y
+  al operador le llega la alarma. El repartidor nunca ve el código.
+  **Las APK anteriores no pueden entregar**: no mandan código.
+- **Faltantes**: `POST /items/:id/faltante` (feriante, mientras
+  prepara) y `/operador/items/:id/faltante`. Marca `items.faltante`,
+  descuenta del `monto_feriante`, devuelve esa parte al cliente y le
+  avisa. El último producto de una parte no se marca: se libera.
+- **Devoluciones parciales** (`reembolsarParte`): ahora
+  `monto_reembolsado` se ACUMULA; antes cada devolución pisaba la
+  anterior. `POST /operador/pedidos/:id/compensar` con motivo.
+- **Viaje sin repartidor**: sube $500 cada 5 minutos, hasta cuatro
+  veces (`escalarViajes`, con el latido), re-avisa a los
+  repartidores y al operador. `POST /operador/viajes/:id/asignar`.
+- **Hora estimada** (`estimarLlegada`): línea recta × 1,4 a 18 km/h
+  más 4 min por retiro pendiente. Es una estimación gruesa, sin
+  tránsito. El cliente ve además el mapa con el repartidor en ruta.
+- **Calificación** 1–5 del cliente (`calificaciones`), una por
+  pedido entregado; suma a `estrellas_suma/_n` de los puestos y del
+  repartidor y pesa en `candidatos()` desde la tercera nota. Con 2
+  o menos, alarma al operador.
+- **Repartidores por feria**: `repartidores.feria_id` (null = todas).
+- **El cliente** ve nombre y teléfono del repartidor mientras lleva
+  su pedido, y le puede dejar una nota (`POST /pedidos/:id/nota`).
+- **El feriante** confirma pagos de días anteriores
+  (`pagosPorConfirmar`).
+- Al repartidor ya se le llamaba cuando todos los puestos aceptan,
+  no cuando terminan: eso no cambió.
+- Sin hacer: registrar el peso real por producto. La devolución
+  parcial con motivo es lo que hay para un reclamo de peso.
 
 ## Notificaciones
 

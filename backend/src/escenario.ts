@@ -93,7 +93,7 @@ if (oC) {
     await api('POST', `/viajes/${viaje.id}/aceptar`, { actor: 'r-diego' });
     const activo = await api('GET', '/repartidor/tablero', { actor: 'r-diego' });
     for (const p of activo.viajeActivo.paradas) {
-      await api('POST', `/paradas/${p.id}/completar`, { actor: 'r-diego' });
+      await api('POST', `/paradas/${p.id}/completar`, { actor: 'r-diego', cuerpo: { motivo: 'entrega del escenario de prueba' } });
     }
   }
 }

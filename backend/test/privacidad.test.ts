@@ -12,7 +12,8 @@ import { pedirCodigo, crearSesion, verificarToken, ErrorAuth } from '../src/domi
 import {
   crearPedido, confirmarPago, aceptarOferta, expirarPendientes,
 } from '../src/dominio/despacho.ts';
-import { aceptarViaje, completarParada, registrarUbicacion } from '../src/dominio/reparto.ts';
+import { aceptarViaje, registrarUbicacion } from '../src/dominio/reparto.ts';
+import { completarParada } from './ayuda.ts';
 import { cancelarPedido } from '../src/dominio/cancelacion.ts';
 import { postular } from '../src/dominio/gente.ts';
 import { iniciarPago, confirmarEnDesarrollo, fijarPasarela } from '../src/dominio/pagos.ts';

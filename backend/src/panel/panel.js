@@ -431,11 +431,28 @@ function vistaDetalle() {
         </tbody></table>
       </div>
 
-      ${p.viaje?.repartidor_nombre ? `
+      ${p.viaje ? `
         <div class="tarjeta">
           <h3>Reparto</h3>
-          <p>${esc(p.viaje.repartidor_nombre)} · ${esc(p.viaje.vehiculo)}
-             <span class="suave">· ${clp(p.viaje.tarifa)}</span></p>
+          ${p.viaje.repartidor_nombre
+            ? `<p>${esc(p.viaje.repartidor_nombre)} · ${esc(p.viaje.vehiculo)}
+                 <span class="suave">· ${clp(p.viaje.tarifa)}</span></p>`
+            : `<p class="suave">Nadie lo ha tomado todavía. Tarifa actual: ${clp(p.viaje.tarifa)}
+                 ${p.viaje.tarifa_base && p.viaje.tarifa > p.viaje.tarifa_base
+                   ? ` (partió en ${clp(p.viaje.tarifa_base)})` : ''}.</p>
+               <button class="accion secundario" data-asignar="${esc(p.viaje.id)}">
+                 Asignarlo a un repartidor</button>`}
+          ${p.codigo_entrega ? `<p class="suave" style="margin-top:8px">Código de entrega del cliente:
+             <strong>${esc(p.codigo_entrega)}</strong></p>` : ''}
+          ${p.entrega_sin_codigo ? `<p style="margin-top:8px;color:#C2701B">Se entregó sin código:
+             «${esc(p.entrega_sin_codigo)}»</p>` : ''}
+        </div>` : ''}
+
+      ${p.calificacion ? `
+        <div class="tarjeta">
+          <h3>Calificación del cliente</h3>
+          <p>${'★'.repeat(p.calificacion.estrellas)}${'☆'.repeat(5 - p.calificacion.estrellas)}
+             ${p.calificacion.comentario ? `<span class="suave"> · «${esc(p.calificacion.comentario)}»</span>` : ''}</p>
         </div>` : ''}
 
       <div class="tarjeta">
@@ -455,6 +472,10 @@ function vistaDetalle() {
         </div>`}
       </div>
 
+      ${p.estado !== 'PENDIENTE_PAGO' && p.estado !== 'EXPIRADO' ? `
+        <button class="accion secundario" data-compensar="${esc(p.id)}" style="margin-bottom:10px">
+          Devolver una parte al cliente
+        </button>` : ''}
       ${!terminado ? `
         <button class="accion peligro" data-cancelar="${esc(p.id)}">
           Cancelar este pedido
@@ -787,7 +808,15 @@ function formularioGente(f, rubros, ferias) {
               <input type="checkbox" data-rubro="${esc(r.id)}"
                      ${(f.rubros ?? []).includes(r.id) ? 'checked' : ''}>${esc(r.nombre)}
             </label>`).join('')}
-        </div>` : ''}
+        </div>` : `
+        <div class="fila" style="margin-top:12px">
+          <label>Reparte para<select id="g-feria-rep">
+            <option value="">Todas las ferias</option>
+            ${ferias.map((x) => `<option value="${esc(x.id)}"
+              ${f.feriaId === x.id ? 'selected' : ''}>
+              Solo ${esc(x.nombre)} · ${esc(x.comuna)}</option>`).join('')}
+          </select></label>
+        </div>`}
       <div class="fila" style="margin-top:14px">
         <button class="accion" id="g-guardar">${f.id ? 'Guardar' : 'Agregar'}</button>
         <button class="accion secundario" id="g-cancelar">Cancelar</button>
@@ -1001,6 +1030,28 @@ function conectar() {
     datos.filtro = e.target.value;
     void cargar();
   });
+  en('[data-compensar]', 'click', async (e) => {
+    const monto = Number(String(prompt('¿Cuánto le devuelves al cliente? (en pesos)') ?? '').replace(/\D/g, ''));
+    if (!monto) return;
+    const motivo = prompt('¿Por qué? Por ejemplo: «la malla pesaba menos», «llegó golpeado».');
+    if (!motivo) return;
+    const id = e.currentTarget.dataset.compensar;
+    await accion(() => api('POST', `/operador/pedidos/${id}/compensar`, { monto, motivo }),
+                 'Devolución pedida.');
+  });
+  en('[data-asignar]', 'click', async (e) => {
+    const viajeId = e.currentTarget.dataset.asignar;
+    const g = datos.gente ?? await api('GET', '/operador/gente');
+    const activos = g.repartidores.filter((r) => r.activo && !r.pendiente);
+    if (!activos.length) return alert('No hay repartidores activos.');
+    const elegido = prompt('¿A quién se lo asignas? Escribe el número:\n\n'
+      + activos.map((r, i) => `${i + 1}. ${r.nombre} (${r.vehiculo})${r.conectado ? ' · conectado' : ''}`).join('\n'));
+    const r = activos[Number(elegido) - 1];
+    if (!r) return;
+    detalle = null;
+    await accion(() => api('POST', `/operador/viajes/${viajeId}/asignar`, { repartidorId: r.id }),
+                 `Viaje asignado a ${r.nombre}.`);
+  });
   en('[data-cancelar]', 'click', async (e) => {
     const motivo = prompt('¿Por qué se cancela? Queda anotado en la bitácora del pedido.');
     if (!motivo) return;
@@ -1087,7 +1138,8 @@ function conectar() {
           feriaId: v('g-feria'),
           rubros: [...document.querySelectorAll('[data-rubro]:checked')]
             .map((el) => el.dataset.rubro) }
-      : { nombre: v('g-nombre'), vehiculo: v('g-vehiculo'), telefono: v('g-telefono') };
+      : { nombre: v('g-nombre'), vehiculo: v('g-vehiculo'), telefono: v('g-telefono'),
+          feriaId: v('g-feria-rep') || null };
     // Lo escrito se guarda antes de mandar: si el servidor lo
     // rechaza, el formulario se repinta y no hay que tipear de nuevo.
     datos.formGente = { ...f, ...cuerpo };

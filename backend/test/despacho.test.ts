@@ -8,7 +8,8 @@ import {
   crearPedido, aceptarOferta, rechazarOferta, liberarSubPedido, marcarListo, tick,
   OfertaNoDisponible,
 } from '../src/dominio/despacho.ts';
-import { aceptarViaje, completarParada, ViajeNoDisponible } from '../src/dominio/reparto.ts';
+import { aceptarViaje, ViajeNoDisponible } from '../src/dominio/reparto.ts';
+import { completarParada } from './ayuda.ts';
 import { calcularLiquidacion, marcarPagado, confirmarRecepcion } from '../src/dominio/liquidaciones.ts';
 import { ofertasAbiertas, colaAutogestion, viajeActivo, metricas } from '../src/dominio/consultas.ts';
 

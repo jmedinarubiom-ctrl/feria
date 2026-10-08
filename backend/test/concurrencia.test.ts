@@ -15,7 +15,8 @@ import { limpiarYSembrar, pedidoPagado } from './ayuda.ts';
 import {
   crearPedido, confirmarPago, aceptarOferta, tick,
 } from '../src/dominio/despacho.ts';
-import { aceptarViaje, completarParada } from '../src/dominio/reparto.ts';
+import { aceptarViaje } from '../src/dominio/reparto.ts';
+import { completarParada } from './ayuda.ts';
 import { pedirCodigo, crearSesion } from '../src/dominio/auth.ts';
 import { fijarPasarela } from '../src/dominio/pagos.ts';
 

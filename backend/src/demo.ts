@@ -187,7 +187,9 @@ for (const p of activo.viajeActivo.paradas) {
 }
 
 for (const p of activo.viajeActivo.paradas) {
-  await api('POST', `/paradas/${p.id}/completar`, { actor: 'r-diego' });
+  // En la entrega el cliente dicta su código; acá lo lee el operador.
+  const codigo = (await api('GET', `/pedidos/${pedido.pedidoId}`, { actor: 'operador' })).codigo_entrega;
+  await api('POST', `/paradas/${p.id}/completar`, { actor: 'r-diego', cuerpo: { codigo } });
   await api('POST', '/repartidor/ubicacion', {
     actor: 'r-diego', cuerpo: { lat: -33.048 + Math.random() * 0.003, lng: -71.615 },
   });

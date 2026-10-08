@@ -13,7 +13,8 @@ import { limpiarYSembrar, pedidoPagado } from './ayuda.ts';
 import {
   crearPedido, confirmarPago, aceptarOferta, liberarSubPedido, marcarListo, expirarPendientes,
 } from '../src/dominio/despacho.ts';
-import { aceptarViaje, completarParada, ViajeNoDisponible } from '../src/dominio/reparto.ts';
+import { aceptarViaje, ViajeNoDisponible } from '../src/dominio/reparto.ts';
+import { completarParada } from './ayuda.ts';
 import { cancelarPedido } from '../src/dominio/cancelacion.ts';
 import { calcularLiquidacion } from '../src/dominio/liquidaciones.ts';
 import { fijarPasarela } from '../src/dominio/pagos.ts';

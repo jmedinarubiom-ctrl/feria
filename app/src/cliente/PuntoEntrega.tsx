@@ -83,7 +83,7 @@ const paginaDeVista = (lat: number, lng: number, exacto: boolean) => `<!doctype 
   ${exacto ? '' : `L.circle([${lat}, ${lng}], { radius: 220, color: '#C2701B', weight: 1, fillOpacity: 0.12 }).addTo(mapa);`}
 </script></body></html>`;
 
-function MapaVista({ lat, lng, exacto }: { lat: number; lng: number; exacto: boolean }) {
+export function MapaVista({ lat, lng, exacto }: { lat: number; lng: number; exacto: boolean }) {
   const html = paginaDeVista(lat, lng, exacto);
   if (WebView) {
     return (

@@ -82,3 +82,17 @@ export function pasarelaDeMentira() {
   } satisfies Pasarela & Record<string, unknown>;
   return p;
 }
+
+/**
+ * Completa una parada como lo haría el repartidor con el cliente al
+ * frente: en la entrega dicta el código del pedido. Los tests del
+ * despacho no tratan del código, así que lo buscan solos.
+ */
+export async function completarParada(paradaId: string, repartidorId: string): Promise<void> {
+  const { consultarUno } = await import('../src/db/index.ts');
+  const { completarParada: deVerdad } = await import('../src/dominio/reparto.ts');
+  const p = await consultarUno<any>(
+    `SELECT pe.codigo_entrega FROM paradas pa JOIN viajes v ON v.id = pa.viaje_id
+       JOIN pedidos pe ON pe.id = v.pedido_id WHERE pa.id = ?`, paradaId);
+  return deVerdad(paradaId, repartidorId, { codigo: p?.codigo_entrega });
+}

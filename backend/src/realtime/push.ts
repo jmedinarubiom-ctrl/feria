@@ -149,7 +149,7 @@ async function avisoDeOferta(m: Extract<Mensaje, { tipo: 'oferta:nueva' }>): Pro
 /** El viaje que se ofrece a todos los repartidores conectados. */
 async function avisosDeViaje(m: Extract<Mensaje, { tipo: 'viaje:nuevo' }>): Promise<MensajePush[]> {
   const viaje = await consultarUno<Fila>(
-    `SELECT v.tarifa, p.numero, p.direccion,
+    `SELECT v.tarifa, p.numero, p.direccion, p.feria_id,
             (SELECT COUNT(*)::int FROM paradas
               WHERE viaje_id = v.id AND tipo = 'RETIRO') AS retiros
        FROM viajes v JOIN pedidos p ON p.id = v.pedido_id
@@ -158,7 +158,9 @@ async function avisosDeViaje(m: Extract<Mensaje, { tipo: 'viaje:nuevo' }>): Prom
   if (!viaje) return [];
 
   const repartidores = await consultar<Fila>(
-    'SELECT push_token FROM repartidores WHERE conectado AND activo AND push_token IS NOT NULL');
+    `SELECT push_token FROM repartidores
+      WHERE conectado AND activo AND push_token IS NOT NULL
+        AND (feria_id IS NULL OR feria_id = ?)`, viaje.feria_id);
 
   return repartidores.map((r) => ({
     to: r.push_token,

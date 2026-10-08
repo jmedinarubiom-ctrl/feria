@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, Linking, Platform, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Linking, Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { api, useTablero } from '../api';
 import { useEnviarUbicacion } from '../ubicacion';
@@ -19,6 +19,11 @@ export default function Repartidor({ repartidorId }: { repartidorId: string }) {
   const { datos, error, cargando, enVivo, recargar } =
     useTablero('/repartidor/tablero', 'repartidor', repartidorId);
   const [ocupado, setOcupado] = useState(false);
+  // La prueba de la entrega: el código que dicta el cliente o, si no
+  // había a quién pedírselo, a quién se le dejó el pedido.
+  const [codigo, setCodigo] = useState('');
+  const [sinCodigo, setSinCodigo] = useState(false);
+  const [motivo, setMotivo] = useState('');
 
   // Antes del primer return: la cantidad de hooks no puede cambiar
   // entre renders. Mientras lleva un viaje, la app manda dónde está.
@@ -121,9 +126,9 @@ export default function Repartidor({ repartidorId }: { repartidorId: string }) {
           {siguiente.items.length > 0 ? (
             <View style={{ marginTop: E.m }}>
               {siguiente.items.map((i: any) => (
-                <Text key={i.id} style={[T.destacado, { marginTop: 2 }]}>
+                <Text key={i.id} style={[T.destacado, { marginTop: 2 }, i.faltante && e.tachado]}>
                   {i.cantidad}× {i.nombre}{'  '}
-                  <Text style={T.apoyo}>{i.formato}</Text>
+                  <Text style={T.apoyo}>{i.faltante ? 'no había: va sin esto' : i.formato}</Text>
                 </Text>
               ))}
             </View>
@@ -169,11 +174,62 @@ export default function Repartidor({ repartidorId }: { repartidorId: string }) {
                   : `https://www.google.com/maps/dir/?api=1&destination=${siguiente.lat},${siguiente.lng}`)}
               />
             ) : null}
+            {siguiente.tipo === 'ENTREGA' ? (
+              <View style={e.prueba}>
+                {!sinCodigo ? (
+                  <>
+                    <Text style={T.seccion}>Código de entrega</Text>
+                    <Text style={T.micro}>Pídeselo al cliente: lo ve en su pedido.</Text>
+                    <TextInput
+                      style={e.campoCodigo}
+                      value={codigo}
+                      onChangeText={(v) => setCodigo(v.replace(/\D/g, '').slice(0, 4))}
+                      placeholder="0000"
+                      placeholderTextColor={C.borde}
+                      keyboardType="number-pad"
+                      maxLength={4}
+                    />
+                    <Pressable onPress={() => setSinCodigo(true)} hitSlop={8}>
+                      <Text style={[T.micro, { color: C.naranja, textAlign: 'center' }]}>
+                        No hay quién me dé el código
+                      </Text>
+                    </Pressable>
+                  </>
+                ) : (
+                  <>
+                    <Text style={T.seccion}>¿A quién se lo dejaste?</Text>
+                    <Text style={T.micro}>Queda anotado y la operación recibe el aviso.</Text>
+                    <TextInput
+                      style={e.campoMotivo}
+                      value={motivo}
+                      onChangeText={setMotivo}
+                      placeholder="Ej.: lo recibió el conserje, don Luis"
+                      placeholderTextColor={C.textoSuave}
+                      maxLength={200}
+                      multiline
+                    />
+                    <Pressable onPress={() => setSinCodigo(false)} hitSlop={8}>
+                      <Text style={[T.micro, { color: C.verde, textAlign: 'center' }]}>
+                        Ya tengo el código
+                      </Text>
+                    </Pressable>
+                  </>
+                )}
+              </View>
+            ) : null}
             <Boton
               titulo={siguiente.tipo === 'RETIRO' ? 'RETIRADO' : 'ENTREGADO'}
               grande
-              deshabilitado={ocupado}
-              onPress={() => accion(() => api('POST', `/paradas/${siguiente.id}/completar`))}
+              deshabilitado={ocupado || (siguiente.tipo === 'ENTREGA'
+                && (sinCodigo ? motivo.trim().length < 8 : codigo.length !== 4))}
+              onPress={() => accion(async () => {
+                await api('POST', `/paradas/${siguiente.id}/completar`, {
+                  cuerpo: siguiente.tipo === 'ENTREGA'
+                    ? (sinCodigo ? { motivo: motivo.trim() } : { codigo })
+                    : {},
+                });
+                setCodigo(''); setMotivo(''); setSinCodigo(false);
+              })}
             />
           </View>
         </Tarjeta>
@@ -206,6 +262,21 @@ export default function Repartidor({ repartidorId }: { repartidorId: string }) {
 }
 
 const e = StyleSheet.create({
+  tachado: { textDecorationLine: 'line-through', color: C.textoSuave },
+  prueba: {
+    gap: E.xs, padding: E.m, borderRadius: R.medio, backgroundColor: C.fondo,
+    borderWidth: 1, borderColor: C.borde,
+  },
+  campoCodigo: {
+    backgroundColor: C.superficie, borderRadius: R.medio, borderWidth: 1, borderColor: C.borde,
+    paddingVertical: E.s, textAlign: 'center', fontFamily: T.cifra.fontFamily,
+    fontSize: 34, letterSpacing: 10, color: C.texto, marginVertical: E.xs,
+  },
+  campoMotivo: {
+    backgroundColor: C.superficie, borderRadius: R.medio, borderWidth: 1, borderColor: C.borde,
+    paddingHorizontal: E.m, paddingVertical: E.s, minHeight: 60, marginVertical: E.xs,
+    fontFamily: T.cuerpo.fontFamily, fontSize: 15, color: C.texto,
+  },
   interruptor: {
     flexDirection: 'row', alignItems: 'center', gap: E.m,
     backgroundColor: C.superficie, borderRadius: R.grande,

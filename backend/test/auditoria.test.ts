@@ -12,7 +12,8 @@ import { abrirDB, cerrarDB, consultar, consultarUno, ejecutar, type Fila } from 
 import { FERIA_ID } from '../src/db/semilla.ts';
 import { limpiarYSembrar, pasarelaDeMentira, pedidoPagado } from './ayuda.ts';
 import { crearPedido, aceptarOferta, marcarListo } from '../src/dominio/despacho.ts';
-import { aceptarViaje, completarParada, ViajeNoDisponible } from '../src/dominio/reparto.ts';
+import { aceptarViaje, ViajeNoDisponible } from '../src/dominio/reparto.ts';
+import { completarParada } from './ayuda.ts';
 import { cancelarPedido } from '../src/dominio/cancelacion.ts';
 import { calcularLiquidacion, marcarPagado } from '../src/dominio/liquidaciones.ts';
 import { iniciarPago, confirmarEnDesarrollo, fijarPasarela } from '../src/dominio/pagos.ts';

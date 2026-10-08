@@ -12,7 +12,7 @@ I. Responsable y marco legal
 
 II. Qué datos tratamos
 
-4. Datos de quienes compran. (a) Datos de identificación y contacto: nombre, número de teléfono, correo electrónico y dirección de entrega. (b) Datos de la cuenta: el teléfono o correo con que ingresa o, si usa Google o Apple, el identificador de esa cuenta, su correo y su nombre; la fecha de aceptación de los Términos; y las sesiones abiertas, con el nombre del dispositivo. (c) Datos de los pedidos: productos, montos, fechas, estado, notas de entrega y, si usted lo marca en el mapa, las coordenadas del punto de entrega. (d) Datos del pago: el estado y los identificadores de la transacción que informa Mercado Pago. No recibimos ni almacenamos los datos de su tarjeta.
+4. Datos de quienes compran. (a) Datos de identificación y contacto: nombre, número de teléfono, correo electrónico y dirección de entrega. (b) Datos de la cuenta: el teléfono o correo con que ingresa o, si usa Google o Apple, el identificador de esa cuenta, su correo y su nombre; la fecha de aceptación de los Términos; y las sesiones abiertas, con el nombre del dispositivo. (c) Datos de los pedidos: productos, montos, fechas, estado, notas de entrega y, si usted lo marca en el mapa, las coordenadas del punto de entrega; y la calificación y el comentario que usted deje sobre un pedido. (d) Datos del pago: el estado y los identificadores de la transacción que informa Mercado Pago. No recibimos ni almacenamos los datos de su tarjeta.
 
 5. Datos de feriantes y repartidores. Nombre, teléfono, puesto y rubros o medio de transporte, según el caso; su actividad en la Aplicación (ofertas recibidas, aceptadas o rechazadas, pedidos preparados o entregados y pagos recibidos); y el identificador necesario para enviarles notificaciones. De los repartidores se registra además la ubicación del dispositivo, únicamente mientras transportan un pedido.
 
@@ -36,7 +36,7 @@ III. Para qué los tratamos y con qué fundamento
 
 IV. Con quién los compartimos
 
-14. Dentro del servicio. El repartidor que lleva su pedido ve su nombre, la dirección y el punto de entrega, su teléfono de contacto y las notas de entrega. El feriante que prepara su pedido ve solo los productos y cantidades, no sus datos personales. El operador de la feria tiene acceso a los pedidos para coordinarlos y resolver problemas.
+14. Dentro del servicio. El repartidor que lleva su pedido ve su nombre, la dirección y el punto de entrega, su teléfono de contacto y las notas de entrega. A su vez, mientras su pedido está en camino usted ve el nombre y el teléfono del repartidor, para poder coordinar la entrega. El feriante que prepara su pedido ve solo los productos y cantidades, no sus datos personales. El operador de la feria tiene acceso a los pedidos para coordinarlos y resolver problemas.
 
 15. Proveedores que tratan datos por nuestra cuenta. Compartimos los datos estrictamente necesarios con los siguientes encargados, que solo pueden usarlos para prestarnos el servicio contratado:
 

@@ -73,6 +73,28 @@ async function buscarProblemas(silencio: number | null): Promise<Problema[]> {
     });
   }
 
+  const sinCodigo = await consultar<Fila>(
+    `SELECT id, numero, entrega_sin_codigo FROM pedidos
+      WHERE entrega_sin_codigo IS NOT NULL AND entregado_at > now() - interval '2 days'`);
+  for (const s of sinCodigo) {
+    p.push({
+      clave: `sin-codigo:${s.id}`,
+      texto: `Pedido #${s.numero}: se entregó sin el código del cliente. El repartidor anotó: «${s.entrega_sin_codigo}».`,
+    });
+  }
+
+  const malas = await consultar<Fila>(
+    `SELECT c.pedido_id, c.estrellas, c.comentario, pe.numero FROM calificaciones c
+       JOIN pedidos pe ON pe.id = c.pedido_id
+      WHERE c.estrellas <= 2 AND c.creado_at > now() - interval '2 days'`);
+  for (const m of malas) {
+    p.push({
+      clave: `nota:${m.pedido_id}`,
+      texto: `Pedido #${m.numero}: el cliente puso ${m.estrellas} ${m.estrellas === 1 ? 'estrella' : 'estrellas'}`
+        + (m.comentario ? `: «${m.comentario}».` : '.'),
+    });
+  }
+
   const fallas = await consultar<Fila>(
     `SELECT camino, count(*)::int AS n, max(mensaje) AS mensaje FROM errores
       WHERE cuando > now() - interval '1 hour' GROUP BY camino`);

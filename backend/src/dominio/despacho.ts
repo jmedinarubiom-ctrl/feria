@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { CONFIG } from '../config.ts';
 import {
   ahora, consultar, consultarUno, ejecutar, enTransaccion, id, registrarEvento, type Fila,
@@ -278,6 +279,9 @@ export async function crearPedido(entrada: PedidoEntrante): Promise<{ pedidoId: 
       EstadoPedido.PENDIENTE_PAGO,
     );
     const numero = creado!.numero;
+    // El código que el cliente le dicta al repartidor al recibir.
+    await ejecutar('UPDATE pedidos SET codigo_entrega = ? WHERE id = ?',
+      String(randomInt(1000, 10000)), pedidoId);
     await registrarEvento('pedido', pedidoId, 'creado',
       { numero, totalProductos, costoDespacho, totalVenta, rubros: [...porRubro.keys()] });
 
@@ -399,7 +403,11 @@ async function candidatos(sub: Fila, pedido: Fila, alcance: string, limite: numb
   return consultar<Fila>(
     `SELECT f.*,
             (f.aceptaciones + 1.0) /
-            (f.aceptaciones + f.rechazos + f.timeouts + f.incumplidos * 3 + 2.0) AS reputacion
+            (f.aceptaciones + f.rechazos + f.timeouts + f.incumplidos * 3 + 2.0)
+            -- Y lo que opinan los clientes: con al menos tres notas,
+            -- un puesto de 5 estrellas pesa el doble que uno de 2,5.
+            * (CASE WHEN f.estrellas_n >= 3 THEN (f.estrellas_suma::float / f.estrellas_n) / 5.0
+                    ELSE 0.85 END) AS reputacion
        FROM feriantes f
       WHERE f.conectado AND f.activo
         AND f.feria_id = ?

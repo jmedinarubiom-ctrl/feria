@@ -63,6 +63,10 @@ import {
 } from '../dominio/archivos.ts';
 import { leerReferencia, creditos } from '../dominio/referencia.ts';
 import { latir } from '../motor.ts';
+import {
+  anotarParaElRepartidor, calificar, compensar, escalarViajes, marcarFaltante,
+  pagosPorConfirmar, repartidorParaAsignar,
+} from '../dominio/mejoras.ts';
 import { guardarPermisoApple, permisoAppleDe, revocarPermisoApple } from '../dominio/apple.ts';
 import { erroresRecientes, registrarError, revisarYAvisar, silencioDelMotor } from '../dominio/alertas.ts';
 import { iniciarComprobantes } from '../dominio/comprobante.ts';
@@ -622,7 +626,11 @@ function sinCostos(p: Fila): Fila {
       ...s,
       items: s.items.map(({ precio_costo, ...i }: Fila) => i),
     })),
-    viaje: p.viaje ? (({ tarifa, ...v }: Fila) => v)(p.viaje) : null,
+    // El teléfono del repartidor, solo mientras lleva el pedido.
+    viaje: p.viaje ? (({ tarifa, tarifa_base, repartidor_telefono, ...v }: Fila) => ({
+      ...v,
+      ...(['ASIGNADO', 'RETIRANDO', 'EN_RUTA'].includes(v.estado) ? { repartidor_telefono } : {}),
+    }))(p.viaje) : null,
   };
 }
 
@@ -773,7 +781,9 @@ GET('/feriante/tablero', async (c) => {
     trabajoDelFeriante(id),
     calcularLiquidacion(id),
   ]);
-  return { feriante, ofertas, trabajo, liquidacion };
+  // Los pagos de otros días que todavía no confirmó: antes solo
+  // podía confirmar el de hoy.
+  return { feriante, ofertas, trabajo, liquidacion, pagosPorConfirmar: await pagosPorConfirmar(id) };
 });
 
 POST('/subpedidos/:id/aceptar', async (c) => aceptarOferta(c.params.id, await actor(c, 'feriante')));
@@ -796,6 +806,31 @@ POST('/subpedidos/:id/listo', async (c) => {
   return { ok: true };
 });
 
+/** El puesto no tiene un producto: no se entrega ni se cobra. */
+POST('/items/:id/faltante', async (c) =>
+  marcarFaltante(c.params.id, { rol: 'feriante', id: await actor(c, 'feriante') }));
+
+POST('/operador/items/:id/faltante', async (c) =>
+  marcarFaltante(c.params.id, { rol: 'operador', id: await actor(c, 'operador') }));
+
+/** Devolver una parte: pesaba menos, llegó golpeado. */
+POST('/operador/pedidos/:id/compensar', async (c) =>
+  compensar(c.params.id, c.cuerpo?.monto, c.cuerpo?.motivo, await actor(c, 'operador')));
+
+/** El operador le entrega a mano un viaje que nadie tomó. */
+POST('/operador/viajes/:id/asignar', async (c) => {
+  await actor(c, 'operador');
+  return aceptarViaje(c.params.id, await repartidorParaAsignar(c.cuerpo?.repartidorId));
+});
+
+/** El cliente califica un pedido que ya le llegó. */
+POST('/pedidos/:id/calificar', async (c) =>
+  calificar(c.params.id, await actor(c, 'cliente'), c.cuerpo?.estrellas, c.cuerpo?.comentario));
+
+/** El cliente deja una indicación para el repartidor. */
+POST('/pedidos/:id/nota', async (c) =>
+  anotarParaElRepartidor(c.params.id, await actor(c, 'cliente'), c.cuerpo?.notas));
+
 POST('/feriante/liquidacion/confirmar', async (c) =>
   confirmarRecepcion(await actor(c, 'feriante'), fechaValida(c.cuerpo?.fecha)));
 
@@ -817,18 +852,23 @@ GET('/repartidor/tablero', async (c) => {
   // El interruptor de la app necesita saber en qué estado está, y
   // antes esto no se devolvía: la pantalla lo adivinaba.
   const yo = await consultarUno<Fila>(
-    'SELECT id, nombre, vehiculo, conectado FROM repartidores WHERE id = ?', id);
+    'SELECT id, nombre, vehiculo, conectado, feria_id FROM repartidores WHERE id = ?', id);
   return {
     repartidor: yo,
     viajeActivo: activo,
-    disponibles: activo ? [] : await viajesDisponibles(),
+    // Con feria asignada ve solo los viajes de esa feria; sin
+    // feria, reparte para todas.
+    disponibles: activo ? [] : await viajesDisponibles(yo?.feria_id ?? undefined),
   };
 });
 
 POST('/viajes/:id/aceptar', async (c) => aceptarViaje(c.params.id, await actor(c, 'repartidor')));
 
 POST('/paradas/:id/completar', async (c) => {
-  await completarParada(c.params.id, await actor(c, 'repartidor'));
+  // En la entrega viaja la prueba: el código del cliente, o a quién
+  // se le dejó el pedido si no había cómo pedirlo.
+  await completarParada(c.params.id, await actor(c, 'repartidor'),
+    { codigo: c.cuerpo?.codigo, motivo: c.cuerpo?.motivo });
   return { ok: true };
 });
 
@@ -913,7 +953,8 @@ GET('/operador/gente', async (c) => {
        LEFT JOIN rubros r ON r.id = fr.rubro_id
       GROUP BY f.id ORDER BY f.pendiente DESC, f.activo DESC, f.conectado DESC, f.nombre`);
   const repartidores = await consultar(
-    `SELECT id, nombre, vehiculo, telefono, conectado, activo, pendiente,
+    `SELECT id, nombre, vehiculo, telefono, conectado, activo, pendiente, feria_id,
+            estrellas_suma, estrellas_n,
             (SELECT COUNT(*)::int FROM viajes v
               WHERE v.repartidor_id = repartidores.id AND v.estado = 'EN_RUTA') AS en_curso
        FROM repartidores ORDER BY pendiente DESC, activo DESC, conectado DESC, nombre`);
@@ -1176,6 +1217,7 @@ POST('/interno/latir', async (c) => {
   const avisos = Promise.all([
     revisarYAvisar(silencio).catch((e) => { console.error('[alertas]', e); }),
     enviarRecordatorios().catch((e) => { console.error('[recordatorios]', e); }),
+    escalarViajes().catch((e) => { console.error('[viajes]', e); }),
   ]);
   const trabajo = Promise.all([latir(() => Date.now() < hasta), limpieza, avisos]).then(() => undefined);
   // Si el entorno deja seguir trabajando después de responder, se

@@ -160,6 +160,8 @@ export async function actualizarFeriante(ferianteId: string, datos: DatosFeriant
 
 export type DatosRepartidor = {
   nombre?: string; vehiculo?: string; telefono?: string; activo?: boolean; pendiente?: boolean;
+  /** La feria para la que reparte. `null` o vacío = todas. */
+  feriaId?: string | null;
 };
 
 export async function crearRepartidor(
@@ -173,9 +175,9 @@ export async function crearRepartidor(
     const nuevo = 'r-' + id().slice(0, 8);
     const solicitud = !!opciones.solicitud;
     await ejecutar(
-      `INSERT INTO repartidores (id, nombre, vehiculo, telefono, conectado, activo, pendiente)
-       VALUES (?, ?, ?, ?, false, ?, ?)`,
-      nuevo, nombre, vehiculo, telefono, !solicitud, solicitud);
+      `INSERT INTO repartidores (id, nombre, vehiculo, telefono, conectado, activo, pendiente, feria_id)
+       VALUES (?, ?, ?, ?, false, ?, ?, ?)`,
+      nuevo, nombre, vehiculo, telefono, !solicitud, solicitud, datos.feriaId || null);
     await registrarEvento('repartidor', nuevo, solicitud ? 'solicitud' : 'creado',
       { nombre, vehiculo });
     if (!solicitud) await cerrarSesionesDelTelefono(telefono);
@@ -206,8 +208,9 @@ export async function actualizarRepartidor(repartidorId: string, datos: DatosRep
     const pendiente = activo ? false : (datos.pendiente ?? actual.pendiente);
     await ejecutar(
       `UPDATE repartidores SET nombre = ?, vehiculo = ?, telefono = ?, activo = ?, pendiente = ?,
-              conectado = conectado AND ? WHERE id = ?`,
-      nombre, vehiculo, telefono, activo, pendiente, activo, repartidorId);
+              conectado = conectado AND ?, feria_id = ? WHERE id = ?`,
+      nombre, vehiculo, telefono, activo, pendiente, activo,
+      datos.feriaId !== undefined ? (datos.feriaId || null) : actual.feria_id, repartidorId);
 
     if (telefono !== actual.telefono || (!activo && actual.activo)) {
       await cerrarSesiones(repartidorId);

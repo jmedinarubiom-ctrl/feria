@@ -49,8 +49,8 @@ export async function crearViaje(pedidoId: string): Promise<string> {
   const tarifa = CONFIG.tarifaReparto
     + Math.max(0, retiros.length - 1) * CONFIG.tarifaPorParadaExtra;
   await ejecutar(
-    `INSERT INTO viajes (id, pedido_id, estado, tarifa) VALUES (?, ?, ?, ?)`,
-    viajeId, pedidoId, EstadoViaje.BUSCANDO, tarifa,
+    `INSERT INTO viajes (id, pedido_id, estado, tarifa, tarifa_base) VALUES (?, ?, ?, ?, ?)`,
+    viajeId, pedidoId, EstadoViaje.BUSCANDO, tarifa, tarifa,
   );
 
   let orden = 0;
@@ -199,7 +199,39 @@ export async function aceptarViaje(viajeId: string, repartidorId: string): Promi
  * sub-pedidos de ese puesto quedan RETIRADO — que el repartidor
  * los tenga en la mano es la única confirmación que importa.
  */
-export async function completarParada(paradaId: string, repartidorId: string): Promise<void> {
+export type PruebaDeEntrega = { codigo?: unknown; motivo?: unknown };
+
+/**
+ * ¿Se entregó de verdad?
+ *
+ * El cliente tiene un código de cuatro dígitos en su pantalla y se lo
+ * dicta al repartidor. Sin eso, «entregado» era la palabra del
+ * repartidor contra la del cliente. Si no hay a quién pedírselo —lo
+ * recibió el conserje, la abuela— el repartidor escribe a quién se
+ * lo dejó: queda anotado y el operador recibe el aviso.
+ */
+async function comprobarEntrega(pedidoId: string, prueba: PruebaDeEntrega): Promise<void> {
+  const pedido = await consultarUno<Fila>(
+    'SELECT numero, codigo_entrega FROM pedidos WHERE id = ?', pedidoId);
+  // Los pedidos anteriores a esta regla no tienen código.
+  if (!pedido?.codigo_entrega) return;
+
+  const codigo = String(prueba.codigo ?? '').replace(/\D/g, '');
+  if (codigo && codigo === pedido.codigo_entrega) return;
+
+  const motivo = String(prueba.motivo ?? '').trim().slice(0, 200);
+  if (!codigo && motivo.length >= 8) {
+    await ejecutar('UPDATE pedidos SET entrega_sin_codigo = ? WHERE id = ?', motivo, pedidoId);
+    return;
+  }
+  throw new ErrorNegocio(422, codigo
+    ? 'Ese no es el código. Pídeselo de nuevo al cliente: lo ve en su pedido.'
+    : 'Pídele al cliente el código de entrega, o escribe a quién se lo dejaste.');
+}
+
+export async function completarParada(
+  paradaId: string, repartidorId: string, prueba: PruebaDeEntrega = {},
+): Promise<void> {
   await enTransaccion(async () => {
     // Con candado: dos toques seguidos al botón no completan la
     // parada dos veces.
@@ -281,6 +313,7 @@ export async function completarParada(paradaId: string, repartidorId: string): P
         throw new ViajeNoDisponible(
           'Todavía falta una bolsa: se está buscando otro puesto. Espera el aviso.');
       }
+      await comprobarEntrega(viaje!.pedido_id, prueba);
       await cambiarEstadoViaje(viaje!.id, EstadoViaje.ENTREGADO, { entregado_at: ahora() });
       await ejecutar('UPDATE pedidos SET estado = ?, entregado_at = ? WHERE id = ?',
         'ENTREGADO', ahora(), viaje!.pedido_id);

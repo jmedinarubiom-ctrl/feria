@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { api, useTablero } from '../api';
 import { C, E, R, T, clp } from '../tema';
@@ -9,6 +9,7 @@ import { Linea } from './Carrito';
 import { abrirPago } from './Pago';
 import { Icono } from '../iconos';
 import { activarPush } from '../notificaciones';
+import { MapaVista } from './PuntoEntrega';
 
 /**
  * Seguimiento del pedido.
@@ -104,11 +105,31 @@ export default function Seguimiento({
             <Text style={[T.titulo, { color: '#FFFFFF', marginTop: 2 }]}>
               {TITULOS[datos.estado] ?? 'Tu pedido va en camino'}
             </Text>
+            {/* Una estimación, no una promesa: por eso «unos». */}
+            {datos.viaje?.eta_minutos && !entregado ? (
+              <Text style={[T.destacado, { color: '#FFFFFF', marginTop: E.xs }]}>
+                Llega en unos {datos.viaje.eta_minutos} minutos
+              </Text>
+            ) : null}
             <Text style={[T.apoyo, { color: 'rgba(255,255,255,0.85)', marginTop: E.xs }]}>
               {datos.direccion}
             </Text>
           </View>
         )}
+
+        {/* El código que prueba la entrega. Se ve desde que el pedido
+            está pagado, para tenerlo a mano cuando toquen el timbre. */}
+        {datos.codigo_entrega && !terminado && !entregado && datos.estado !== 'PENDIENTE_PAGO' ? (
+          <View style={[e.tarjeta, e.codigo]}>
+            <View style={{ flex: 1 }}>
+              <Text style={T.seccion}>Tu código de entrega</Text>
+              <Text style={[T.micro, { marginTop: 2 }]}>
+                Díctaselo al repartidor cuando recibas tu pedido. No se lo des antes.
+              </Text>
+            </View>
+            <Text style={e.codigoNumero}>{datos.codigo_entrega}</Text>
+          </View>
+        ) : null}
 
         {datos.estado === 'PENDIENTE_PAGO' ? (
           <Boton
@@ -138,7 +159,32 @@ export default function Seguimiento({
               </Text>
               <Text style={T.micro}>En {datos.viaje.vehiculo}</Text>
             </View>
+            {datos.viaje.repartidor_telefono ? (
+              <Pressable onPress={() => llamar(datos.viaje.repartidor_telefono)} style={e.llamar} hitSlop={8}
+                         accessibilityLabel="Llamar al repartidor">
+                <Icono nombre="telefono" tamano={18} color={C.verdeOscuro} />
+                <Text style={[T.micro, { color: C.verdeOscuro, fontFamily: T.destacado.fontFamily }]}>Llamar</Text>
+              </Pressable>
+            ) : null}
           </View>
+        ) : null}
+
+        {/* Por dónde viene, cuando ya salió de la feria. */}
+        {datos.estado === 'EN_RUTA' && Number.isFinite(datos.viaje?.lat) && Number.isFinite(datos.viaje?.lng) ? (
+          <View>
+            <MapaVista lat={datos.viaje.lat} lng={datos.viaje.lng} exacto />
+            <Text style={[T.micro, { marginTop: E.xs, textAlign: 'center' }]}>
+              Tu repartidor va por aquí. Se actualiza solo.
+            </Text>
+          </View>
+        ) : null}
+
+        {!terminado && !entregado && datos.estado !== 'PENDIENTE_PAGO' ? (
+          <NotaParaElRepartidor pedidoId={pedidoId} inicial={datos.notas ?? ''} />
+        ) : null}
+
+        {entregado ? (
+          <Calificacion pedidoId={pedidoId} hecha={datos.calificacion} alGuardar={recargar} />
         ) : null}
 
         <View style={[e.tarjeta, { gap: E.s }]}>
@@ -147,7 +193,14 @@ export default function Seguimiento({
             <View key={s.id} style={{ gap: 2 }}>
               {s.items.map((i: any) => (
                 <View key={i.id} style={e.entre}>
-                  <Text style={T.cuerpo}>{i.cantidad}× {i.nombre}</Text>
+                  <Text style={[T.cuerpo, { flex: 1 }, i.faltante && e.tachado]}>
+                    {i.cantidad}× {i.nombre}
+                  </Text>
+                  {i.faltante ? (
+                    <Text style={[T.micro, { color: C.naranja }]}>
+                      No había · te devolvemos {clp(i.cantidad * i.precio_venta)}
+                    </Text>
+                  ) : null}
                 </View>
               ))}
             </View>
@@ -179,6 +232,103 @@ export default function Seguimiento({
   );
 }
 
+/** Una indicación para quien trae el pedido: el timbre, la reja, el piso. */
+function NotaParaElRepartidor({ pedidoId, inicial }: { pedidoId: string; inicial: string }) {
+  const [nota, setNota] = useState(inicial);
+  const [guardada, setGuardada] = useState(inicial);
+  const [ocupado, setOcupado] = useState(false);
+  const guardar = async () => {
+    setOcupado(true);
+    try {
+      await api('POST', `/pedidos/${pedidoId}/nota`, { cuerpo: { notas: nota } });
+      setGuardada(nota);
+    } catch (err: any) {
+      Alert.alert('No se pudo guardar', err.message);
+    } finally {
+      setOcupado(false);
+    }
+  };
+  return (
+    <View style={[e.tarjeta, { gap: E.s }]}>
+      <Text style={T.seccion}>Indicación para el repartidor</Text>
+      <TextInput
+        style={e.campoNota}
+        value={nota}
+        onChangeText={setNota}
+        placeholder="Ej.: toca el timbre de abajo, depto 3"
+        placeholderTextColor={C.textoSuave}
+        maxLength={300}
+        multiline
+      />
+      {nota.trim() !== guardada.trim() ? (
+        <Boton titulo={ocupado ? 'Guardando…' : 'Guardar indicación'} variante="secundario"
+               onPress={guardar} deshabilitado={ocupado} />
+      ) : guardada.trim() ? (
+        <Text style={[T.micro, { color: C.verdeOscuro }]}>El repartidor ya la tiene.</Text>
+      ) : null}
+    </View>
+  );
+}
+
+/** Cómo llegó el pedido, de una a cinco estrellas. Una vez por pedido. */
+function Calificacion({ pedidoId, hecha, alGuardar }: {
+  pedidoId: string; hecha: { estrellas: number; comentario?: string | null } | null; alGuardar: () => void;
+}) {
+  const [estrellas, setEstrellas] = useState(0);
+  const [comentario, setComentario] = useState('');
+  const [ocupado, setOcupado] = useState(false);
+
+  if (hecha) {
+    return (
+      <View style={[e.tarjeta, { alignItems: 'center', gap: E.xs }]}>
+        <Text style={T.seccion}>Tu calificación</Text>
+        <Text style={e.estrellas}>{'★'.repeat(hecha.estrellas)}<Text style={{ color: C.borde }}>{'★'.repeat(5 - hecha.estrellas)}</Text></Text>
+        <Text style={T.micro}>¡Gracias! Con esto elegimos a los mejores puestos.</Text>
+      </View>
+    );
+  }
+  const enviar = async () => {
+    setOcupado(true);
+    try {
+      await api('POST', `/pedidos/${pedidoId}/calificar`, { cuerpo: { estrellas, comentario } });
+      alGuardar();
+    } catch (err: any) {
+      Alert.alert('No se pudo guardar', err.message);
+    } finally {
+      setOcupado(false);
+    }
+  };
+  return (
+    <View style={[e.tarjeta, { alignItems: 'center', gap: E.s }]}>
+      <Text style={T.destacado}>¿Cómo llegó tu pedido?</Text>
+      <View style={{ flexDirection: 'row', gap: E.s }}>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <Pressable key={n} onPress={() => setEstrellas(n)} hitSlop={6}
+                     accessibilityLabel={`${n} ${n === 1 ? 'estrella' : 'estrellas'}`}>
+            <Text style={[e.estrellas, { fontSize: 38, color: n <= estrellas ? C.ambar : C.borde }]}>★</Text>
+          </Pressable>
+        ))}
+      </View>
+      {estrellas > 0 ? (
+        <>
+          <TextInput
+            style={[e.campoNota, { alignSelf: 'stretch' }]}
+            value={comentario}
+            onChangeText={setComentario}
+            placeholder={estrellas <= 3 ? '¿Qué pasó? Nos sirve para mejorar' : 'Cuéntanos (opcional)'}
+            placeholderTextColor={C.textoSuave}
+            maxLength={500}
+            multiline
+          />
+          <View style={{ alignSelf: 'stretch' }}>
+            <Boton titulo={ocupado ? 'Enviando…' : 'ENVIAR'} onPress={enviar} deshabilitado={ocupado} />
+          </View>
+        </>
+      ) : null}
+    </View>
+  );
+}
+
 const TITULOS: Record<string, string> = {
   PENDIENTE_PAGO: 'Esperando el pago',
   DESPACHANDO: 'Buscando el puesto',
@@ -189,6 +339,16 @@ const TITULOS: Record<string, string> = {
 };
 
 const e = StyleSheet.create({
+  codigo: { flexDirection: 'row', alignItems: 'center', gap: E.m, borderColor: C.verde + '66', backgroundColor: C.verdeSuave },
+  codigoNumero: { fontFamily: T.cifra.fontFamily, fontSize: 34, letterSpacing: 4, color: C.verdeOscuro },
+  llamar: { alignItems: 'center', gap: 2, paddingHorizontal: E.s },
+  tachado: { textDecorationLine: 'line-through', color: C.textoSuave },
+  campoNota: {
+    backgroundColor: C.fondo, borderRadius: R.medio, borderWidth: 1, borderColor: C.borde,
+    paddingHorizontal: E.m, paddingVertical: E.s, minHeight: 44,
+    fontFamily: T.cuerpo.fontFamily, fontSize: 15, color: C.texto,
+  },
+  estrellas: { fontSize: 26, color: C.ambar, letterSpacing: 2 },
   pantalla: { flex: 1, backgroundColor: C.fondo },
   cabecera: {
     flexDirection: 'row', alignItems: 'center', gap: E.m,
