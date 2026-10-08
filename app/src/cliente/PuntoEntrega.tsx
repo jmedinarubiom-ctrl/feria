@@ -1,11 +1,12 @@
-import React, { useRef, useState } from 'react';
-import { Alert, Modal, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Alert, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Location from 'expo-location';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { api } from '../api';
 import { C, E, FUENTES, R, T } from '../tema';
 import { Boton } from '../ui';
+import { Icono } from '../iconos';
 
 /**
  * El punto exacto donde se entrega.
@@ -59,6 +60,49 @@ const paginaDelMapa = (lat: number, lng: number) => `<!doctype html>
   avisar();
 </script></body></html>`;
 
+/**
+ * El mapa chico que se ve en la pantalla de pago: no se mueve, solo
+ * muestra dónde se va a entregar. Al tocarlo se abre el mapa grande.
+ */
+const paginaDeVista = (lat: number, lng: number, exacto: boolean) => `<!doctype html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  html, body, #mapa { height: 100%; margin: 0; background: #E4ECDC; }
+  .leaflet-control-attribution { font-size: 9px; }
+  #mira { position: absolute; left: 50%; top: 50%; margin: -38px 0 0 -19px; z-index: 1000;
+          pointer-events: none; opacity: ${exacto ? 1 : 0.75}; }
+</style></head>
+<body><div id="mapa"></div><div id="mira"><svg width="38" height="38" viewBox="0 0 24 24"><path d="M12 22s-7-6.3-7-12a7 7 0 0 1 14 0c0 5.7-7 12-7 12z" fill="${exacto ? '#8B2838' : '#C2701B'}" stroke="#fff" stroke-width="1.2"/><circle cx="12" cy="10" r="2.6" fill="#fff"/></svg></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  var mapa = L.map('mapa', { zoomControl: false, dragging: false, touchZoom: false, scrollWheelZoom: false,
+    doubleClickZoom: false, boxZoom: false, keyboard: false, tap: false }).setView([${lat}, ${lng}], ${exacto ? 17 : 15});
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(mapa);
+  ${exacto ? '' : `L.circle([${lat}, ${lng}], { radius: 220, color: '#C2701B', weight: 1, fillOpacity: 0.12 }).addTo(mapa);`}
+</script></body></html>`;
+
+function MapaVista({ lat, lng, exacto }: { lat: number; lng: number; exacto: boolean }) {
+  const html = paginaDeVista(lat, lng, exacto);
+  if (WebView) {
+    return (
+      <View style={e.mapaVista} pointerEvents="none">
+        <WebView originWhitelist={['*']} source={{ html }} scrollEnabled={false} style={{ flex: 1 }} />
+      </View>
+    );
+  }
+  // En la versión web de la app no hay WebView, pero sí un marco.
+  return (
+    <View style={e.mapaVista} pointerEvents="none">
+      {React.createElement('iframe', {
+        srcDoc: html, title: 'Mapa del punto de entrega',
+        style: { border: 0, width: '100%', height: '100%' },
+      })}
+    </View>
+  );
+}
+
 export default function PuntoEntrega({ direccion, feriaId, punto, onCambio }: {
   direccion: string;
   /** Para abrir el mapa en la comuna de la feria elegida. */
@@ -74,6 +118,30 @@ export default function PuntoEntrega({ direccion, feriaId, punto, onCambio }: {
   const mapa = useRef<any>(null);
   const [escrito, setEscrito] = useState('');
   const [yendo, setYendo] = useState(false);
+
+  // Mientras no haya un punto marcado, el mapa muestra más o menos
+  // dónde queda la dirección escrita: así se ve al tiro si el
+  // buscador la entendió o la mandó a otra comuna. Se espera a que
+  // la persona deje de escribir antes de preguntar.
+  const [aprox, setAprox] = useState<{ lat: number; lng: number } | null>(null);
+  const [ubicando, setUbicando] = useState(false);
+  useEffect(() => {
+    const texto = direccion.trim();
+    setAprox(null);
+    if (texto.length < 6) return;
+    let vigente = true;
+    const t = setTimeout(async () => {
+      setUbicando(true);
+      try {
+        const q = `direccion=${encodeURIComponent(texto)}&feria=${encodeURIComponent(feriaId)}`;
+        const r = await api('GET', `/cliente/ubicar?${q}`);
+        if (vigente && r.encontrada) setAprox({ lat: r.lat, lng: r.lng });
+      } catch { /* sin mapa aproximado: queda el aviso de marcar el punto */ } finally {
+        if (vigente) setUbicando(false);
+      }
+    }, 1400);
+    return () => { vigente = false; clearTimeout(t); };
+  }, [direccion, feriaId]);
 
   /**
    * Lleva el mapa a lo que se escribió: unas coordenadas o una
@@ -153,41 +221,70 @@ export default function PuntoEntrega({ direccion, feriaId, punto, onCambio }: {
     }
   };
 
+  const marcado = !!punto && !desactualizado;
+  const vista = marcado ? { lat: punto!.lat, lng: punto!.lng } : aprox;
+  const puedeAbrirMapa = !!WebView;
+
   return (
     <View style={e.caja}>
-      <Text style={T.micro}>PUNTO EXACTO DE ENTREGA</Text>
-      {punto && !desactualizado ? (
-        <Text style={[T.destacado, { marginTop: 2, color: C.verdeOscuro }]}>
-          Punto marcado ✓
-          <Text style={T.apoyo}>
-            {punto.precisionM ? `  ±${Math.round(punto.precisionM)} m` : '  ajustado en el mapa'}
+      {/* El mapa va arriba y a la vista: es la forma más rápida de
+          confirmar que el pedido va a llegar donde uno cree. */}
+      <Pressable
+        onPress={() => { if (puedeAbrirMapa) { setEscrito(''); void abrirMapa(); } }}
+        disabled={!puedeAbrirMapa || abriendo}
+        accessibilityRole="button"
+        accessibilityLabel="Ver o ajustar el punto de entrega en el mapa"
+      >
+        {vista ? (
+          <MapaVista lat={vista.lat} lng={vista.lng} exacto={marcado} />
+        ) : (
+          <View style={[e.mapaVista, e.mapaVacio]}>
+            <Icono nombre="pin" tamano={30} color={C.textoSuave} />
+            <Text style={[T.apoyo, { textAlign: 'center', marginTop: E.xs }]}>
+              {ubicando ? 'Buscando la dirección…'
+                : direccion.trim().length < 6 ? 'Escribe tu dirección y aparece el mapa'
+                : 'No encontramos esa dirección en el mapa. Márcala tú.'}
+            </Text>
+          </View>
+        )}
+        <View style={[e.insignia, { backgroundColor: marcado ? C.verde : vista ? C.naranja : C.textoSuave }]}>
+          {marcado ? <Icono nombre="listo" tamano={13} color="#FFFFFF" grosor={2.6} /> : null}
+          <Text style={e.insigniaTexto}>
+            {marcado
+              ? `Punto exacto${punto!.precisionM ? ` · ±${Math.round(punto!.precisionM)} m` : ''}`
+              : vista ? 'Ubicación aproximada' : 'Sin punto marcado'}
           </Text>
-        </Text>
-      ) : (
-        <Text style={[T.apoyo, { marginTop: 2 }]}>
-          {desactualizado
-            ? 'Cambiaste la dirección: marca el punto de nuevo.'
-            : 'Marca dónde entregamos, para que el repartidor llegue directo. '
-              + 'Con tu ubicación si estás en el lugar, o eligiéndolo en el mapa.'}
-        </Text>
-      )}
+        </View>
+      </Pressable>
 
-      <View style={{ marginTop: E.s, gap: E.s }}>
-        <Boton
-          titulo={buscando ? 'UBICANDO…' : punto && !desactualizado
-            ? 'Volver a marcar con mi ubicación' : 'USAR MI UBICACIÓN ACTUAL'}
-          variante={punto && !desactualizado ? 'secundario' : 'primario'}
-          onPress={usarGps}
-          deshabilitado={buscando}
-        />
-        {WebView ? (
+      <Text style={[T.micro, { marginTop: E.s }]}>
+        {marcado
+          ? 'El repartidor llega directo a este punto.'
+          : desactualizado
+            ? 'Cambiaste la dirección: marca el punto de nuevo.'
+            : vista
+              ? 'Así ubicamos tu dirección. Marca el punto exacto para que el repartidor llegue a tu puerta.'
+              : 'Marca el punto exacto para que el repartidor llegue a tu puerta.'}
+      </Text>
+
+      <View style={e.acciones}>
+        <View style={{ flex: 1 }}>
           <Boton
-            titulo={abriendo ? 'ABRIENDO EL MAPA…'
-              : punto && !desactualizado ? 'Ver o cambiar en el mapa' : 'Elegir otro punto en el mapa'}
-            variante="secundario"
-            onPress={() => { setEscrito(''); void abrirMapa(); }}
-            deshabilitado={abriendo}
+            titulo={buscando ? 'Ubicando…' : 'Mi ubicación'}
+            variante={marcado ? 'secundario' : 'primario'}
+            onPress={usarGps}
+            deshabilitado={buscando}
           />
+        </View>
+        {puedeAbrirMapa ? (
+          <View style={{ flex: 1 }}>
+            <Boton
+              titulo={abriendo ? 'Abriendo…' : marcado ? 'Ajustar en mapa' : 'Elegir en mapa'}
+              variante="secundario"
+              onPress={() => { setEscrito(''); void abrirMapa(); }}
+              deshabilitado={abriendo}
+            />
+          </View>
         ) : null}
       </View>
 
@@ -285,8 +382,16 @@ const e = StyleSheet.create({
     borderRadius: R.medio, paddingHorizontal: E.m, paddingVertical: E.m,
     fontFamily: FUENTES.cuerpo, fontSize: 15, color: C.texto,
   },
-  caja: {
-    backgroundColor: C.fondo, borderRadius: R.medio,
-    borderWidth: 1, borderColor: C.borde, padding: E.m,
+  caja: {},
+  mapaVista: {
+    height: 170, borderRadius: R.medio, overflow: 'hidden',
+    borderWidth: 1, borderColor: C.borde, backgroundColor: C.verdeSuave,
   },
+  mapaVacio: { alignItems: 'center', justifyContent: 'center', padding: E.l, backgroundColor: C.superficieAlta },
+  insignia: {
+    position: 'absolute', left: E.s, top: E.s, flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: E.s, paddingVertical: 4, borderRadius: R.pastilla,
+  },
+  insigniaTexto: { color: '#FFFFFF', fontFamily: FUENTES.cuerpoFuerte, fontSize: 12 },
+  acciones: { flexDirection: 'row', gap: E.s, marginTop: E.s },
 });

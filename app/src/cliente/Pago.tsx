@@ -33,6 +33,7 @@ export default function Pago({
   const [catalogo, setCatalogo] = useState<any[] | null>(null);
   const [cotizacion, setCotizacion] = useState<any>(null);
   const [pagando, setPagando] = useState(false);
+  const [editandoQuien, setEditandoQuien] = useState(false);
   const inset = useSafeAreaInsets();
 
   useEffect(() => { api('GET', '/catalogo').then(setCatalogo).catch(() => {}); }, []);
@@ -58,6 +59,18 @@ export default function Pago({
   const completo = !!(
     borrador.nombre.trim() && borrador.telefono.trim() && borrador.direccion.trim()
   );
+  // Qué falta, dicho con nombre: «completa los datos» no le dice a
+  // nadie qué casilla dejó vacía.
+  const falta = [
+    !borrador.direccion.trim() && 'la dirección',
+    !borrador.nombre.trim() && 'tu nombre',
+    !borrador.telefono.trim() && 'un teléfono',
+  ].filter(Boolean) as string[];
+  const quienResumido = !editandoQuien && !!(borrador.nombre.trim() && borrador.telefono.trim());
+  const lineas = Object.entries(carro).map(([id, cantidad]) => {
+    const p = productos.find((x: any) => x.id === id);
+    return p ? { id, cantidad, nombre: p.nombre as string, subtotal: p.precio_venta * cantidad } : null;
+  }).filter(Boolean) as Array<{ id: string; cantidad: number; nombre: string; subtotal: number }>;
 
   const pagar = async () => {
     setPagando(true);
@@ -122,32 +135,17 @@ export default function Pago({
         contentContainerStyle={[e.relleno, { paddingBottom: 150 + inset.bottom }]}
         keyboardShouldPersistTaps="handled"
       >
+        {/* 1 · Dónde. Va primero y con el mapa a la vista: es lo que
+            más cuesta arreglar después si queda mal. */}
         <View style={e.bloque}>
-          <Text style={[T.destacado, { marginBottom: E.s }]}>¿Dónde lo dejamos?</Text>
+          <Paso n={1} titulo="¿Dónde lo entregamos?" listo={!!borrador.direccion.trim()} />
           <View style={{ gap: E.m }}>
-            <Campo
-              etiqueta="Nombre"
-              value={borrador.nombre}
-              onChangeText={(v) => setBorrador({ ...borrador, nombre: v })}
-              placeholder="Tu nombre"
-            />
-            <Campo
-              etiqueta={telefonoVerificado ? 'Teléfono (confirmado)' : 'Teléfono'}
-              value={telefonoVerificado ?? borrador.telefono}
-              onChangeText={(v) => setBorrador({ ...borrador, telefono: v })}
-              placeholder="+56 9 1234 5678"
-              keyboardType="phone-pad"
-              // El confirmado se cambia en Perfil, con un código.
-              editable={!telefonoVerificado}
-              ayuda={telefonoVerificado
-                ? 'Es el número de tu cuenta. Se cambia en Perfil.'
-                : 'Para avisarte cuando el repartidor esté llegando.'}
-            />
             <Campo
               etiqueta="Dirección"
               value={borrador.direccion}
               onChangeText={(v) => setBorrador({ ...borrador, direccion: v })}
-              placeholder="Calle, número, depto"
+              placeholder="Calle, número, depto, comuna"
+              ayuda="Agrega el depto, el block o una referencia: «casa azul, reja negra»."
             />
             <PuntoEntrega
               direccion={borrador.direccion}
@@ -155,25 +153,85 @@ export default function Pago({
               punto={borrador.punto ?? null}
               onCambio={(punto) => setBorrador({ ...borrador, punto })}
             />
-            <Campo
-              etiqueta="Correo (opcional)"
-              value={borrador.email}
-              onChangeText={(v) => setBorrador({ ...borrador, email: v })}
-              placeholder="tu@correo.cl"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              ayuda="Para el respaldo del pedido y, si hace falta, la devolución."
-            />
           </View>
         </View>
 
+        {/* 2 · Quién. Si ya lo sabemos por el perfil, se muestra
+            resumido: no hay por qué volver a escribirlo. */}
         <View style={e.bloque}>
-          <Text style={[T.destacado, { marginBottom: E.s }]}>Cómo pagas</Text>
+          <Paso n={2} titulo="¿Quién recibe?" listo={!!(borrador.nombre.trim() && borrador.telefono.trim())} />
+          {quienResumido ? (
+            <Pressable onPress={() => setEditandoQuien(true)} style={e.resumenQuien}>
+              <View style={{ flex: 1 }}>
+                <Text style={T.destacado}>{borrador.nombre}</Text>
+                <Text style={T.apoyo}>
+                  {telefonoVerificado ?? borrador.telefono}
+                  {borrador.email ? `  ·  ${borrador.email}` : ''}
+                </Text>
+              </View>
+              <Text style={[T.micro, { color: C.verde, fontFamily: T.destacado.fontFamily }]}>Cambiar</Text>
+            </Pressable>
+          ) : (
+            <View style={{ gap: E.m }}>
+              <Campo
+                etiqueta="Nombre"
+                value={borrador.nombre}
+                onChangeText={(v) => setBorrador({ ...borrador, nombre: v })}
+                placeholder="Tu nombre"
+              />
+              <Campo
+                etiqueta={telefonoVerificado ? 'Teléfono (confirmado)' : 'Teléfono'}
+                value={telefonoVerificado ?? borrador.telefono}
+                onChangeText={(v) => setBorrador({ ...borrador, telefono: v })}
+                placeholder="+56 9 1234 5678"
+                keyboardType="phone-pad"
+                // El confirmado se cambia en Perfil, con un código.
+                editable={!telefonoVerificado}
+                ayuda={telefonoVerificado
+                  ? 'Es el número de tu cuenta. Se cambia en Perfil.'
+                  : 'Para que el repartidor te avise cuando esté llegando.'}
+              />
+              <Campo
+                etiqueta="Correo (opcional)"
+                value={borrador.email}
+                onChangeText={(v) => setBorrador({ ...borrador, email: v })}
+                placeholder="tu@correo.cl"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                ayuda="Ahí te llega el respaldo del pedido."
+              />
+            </View>
+          )}
+        </View>
+
+        {/* 3 · Qué. Un vistazo al pedido antes de pagar, sin volver atrás. */}
+        <View style={e.bloque}>
+          <View style={e.entre}>
+            <Paso n={3} titulo="Tu pedido" listo />
+            <Pressable onPress={volver} hitSlop={10}>
+              <Text style={[T.micro, { color: C.verde, fontFamily: T.destacado.fontFamily }]}>Editar</Text>
+            </Pressable>
+          </View>
+          {lineas.slice(0, 4).map((l) => (
+            <View key={l.id} style={e.entre}>
+              <Text style={[T.cuerpo, { flex: 1 }]} numberOfLines={1}>
+                <Text style={T.destacado}>{l.cantidad}×</Text> {l.nombre}
+              </Text>
+              <Text style={T.apoyo}>{clp(l.subtotal)}</Text>
+            </View>
+          ))}
+          {lineas.length > 4 ? (
+            <Text style={[T.micro, { marginTop: E.xs }]}>y {lineas.length - 4} más</Text>
+          ) : null}
+        </View>
+
+        <View style={e.bloque}>
+          <Paso n={4} titulo="Cómo pagas" listo />
           <View style={e.medio}>
             <Icono nombre="tarjeta" tamano={24} color={C.verdeOscuro} />
             <View style={{ flex: 1 }}>
               <Text style={T.destacado}>Tarjeta o transferencia</Text>
-              <Text style={T.micro}>Pagas en la página segura de la pasarela</Text>
+              <Text style={T.micro}>Pagas en la página segura de Mercado Pago. No guardamos tu tarjeta.</Text>
             </View>
           </View>
         </View>
@@ -214,12 +272,30 @@ export default function Pago({
           onPress={pagar}
           deshabilitado={!completo || pagando || !cotizacion?.alcanzaMinimo}
         />
-        {!completo ? (
+        {falta.length ? (
+          <Text style={[T.micro, { textAlign: 'center', marginTop: E.s, color: C.naranja }]}>
+            Falta {falta.join(', ')}.
+          </Text>
+        ) : !borrador.punto || borrador.punto.direccion.trim() !== borrador.direccion.trim() ? (
           <Text style={[T.micro, { textAlign: 'center', marginTop: E.s }]}>
-            Completa nombre, teléfono y dirección.
+            Consejo: marca el punto en el mapa y el repartidor llega directo.
           </Text>
         ) : null}
       </View>
+    </View>
+  );
+}
+
+/** El título de cada paso, con su número y un visto cuando está completo. */
+function Paso({ n, titulo, listo }: { n: number; titulo: string; listo?: boolean }) {
+  return (
+    <View style={e.paso}>
+      <View style={[e.pasoNumero, listo && { backgroundColor: C.verde, borderColor: C.verde }]}>
+        {listo
+          ? <Icono nombre="listo" tamano={13} color="#FFFFFF" grosor={2.8} />
+          : <Text style={[T.micro, { color: C.textoSuave, fontFamily: T.destacado.fontFamily }]}>{n}</Text>}
+      </View>
+      <Text style={T.destacado}>{titulo}</Text>
     </View>
   );
 }
@@ -269,6 +345,16 @@ async function esperarConfirmacion(
 }
 
 const e = StyleSheet.create({
+  paso: { flexDirection: 'row', alignItems: 'center', gap: E.s, marginBottom: E.m },
+  pasoNumero: {
+    width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: C.borde,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  entre: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: E.s },
+  resumenQuien: {
+    flexDirection: 'row', alignItems: 'center', gap: E.m,
+    backgroundColor: C.fondo, borderRadius: R.medio, padding: E.m,
+  },
   pantalla: { flex: 1, backgroundColor: C.fondo },
   cabecera: {
     flexDirection: 'row', alignItems: 'center', gap: E.m,
