@@ -132,3 +132,50 @@ export function alTocarNotificacion(fn: (datos: any) => void): () => void {
   });
   return () => sub.remove();
 }
+
+// ============================================================
+// El carrito que quedó a medias
+// ============================================================
+
+const ID_CARRITO = 'feria.carrito';
+/** A las cuántas horas de dejar el carrito se le recuerda. */
+const HORAS_CARRITO = 2;
+
+/**
+ * Recuerda el carrito sin terminar.
+ *
+ * El carrito vive en el teléfono —el servidor no sabe que existe
+ * hasta que se convierte en pedido—, así que el recordatorio también:
+ * es una notificación que el propio teléfono se programa. Se vuelve
+ * a programar con cada cambio y se cancela cuando el carrito queda
+ * vacío o se paga. Si la persona no dio permiso de notificaciones no
+ * hace nada: acá no se le pide.
+ */
+export async function recordarCarrito(unidades: number): Promise<void> {
+  try {
+    await Notifications.cancelScheduledNotificationAsync(ID_CARRITO).catch(() => {});
+    if (unidades <= 0 || Platform.OS === 'web') return;
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') return;
+    await crearCanales();
+    await Notifications.scheduleNotificationAsync({
+      identifier: ID_CARRITO,
+      content: {
+        title: 'Tu carrito te está esperando',
+        body: unidades === 1
+          ? 'Dejaste 1 producto sin pedir. Termina tu compra antes de que cierre la feria.'
+          : `Dejaste ${unidades} productos sin pedir. Termina tu compra antes de que cierre la feria.`,
+        sound: 'default',
+        data: { tipo: 'carrito' },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds: HORAS_CARRITO * 3600,
+        channelId: 'pedidos',
+      },
+    });
+  } catch {
+    // Un recordatorio que no se pudo programar no es un error que
+    // haya que mostrarle a nadie.
+  }
+}

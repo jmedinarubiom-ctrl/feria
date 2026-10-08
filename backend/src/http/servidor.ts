@@ -37,7 +37,7 @@ import {
   eliminarCuentaCliente, eliminarCuentaEquipo, limpiarDatosViejos,
 } from '../dominio/privacidad.ts';
 import { proveedorSms } from '../sms.ts';
-import { iniciarNotificaciones } from '../realtime/push.ts';
+import { avisarPagoAlFeriante, enviarRecordatorios, iniciarNotificaciones } from '../realtime/push.ts';
 import {
   iniciarPago, confirmarDesdePasarela, confirmarEnDesarrollo, pagosDe,
   revisarCobrosAbiertos, revisarCobro, pasarela, pasarelaConfigurada, ErrorPago,
@@ -982,7 +982,12 @@ POST('/operador/autogestion/:id/listo', async (c) => {
 
 POST('/operador/liquidaciones/:ferianteId/pagar', async (c) => {
   await actor(c, 'operador');
-  return marcarPagado(c.params.ferianteId, fechaValida(c.cuerpo?.fecha));
+  const r: any = await marcarPagado(c.params.ferianteId, fechaValida(c.cuerpo?.fecha));
+  // El feriante se entera al tiro y lo confirma en su app.
+  const aviso = avisarPagoAlFeriante(c.params.ferianteId, Number(r?.monto ?? r?.total ?? r?.liquidacion?.monto ?? 0))
+    .catch((e) => console.error('[push] pago', e));
+  (globalThis as any).EdgeRuntime?.waitUntil?.(aviso);
+  return r;
 });
 
 // ---------- Catálogo ----------
@@ -1168,7 +1173,10 @@ POST('/interno/latir', async (c) => {
     : Promise.resolve();
   // El silencio se mide antes de volver a latir: después ya no se nota.
   const silencio = await silencioDelMotor();
-  const avisos = revisarYAvisar(silencio).catch((e) => { console.error('[alertas]', e); });
+  const avisos = Promise.all([
+    revisarYAvisar(silencio).catch((e) => { console.error('[alertas]', e); }),
+    enviarRecordatorios().catch((e) => { console.error('[recordatorios]', e); }),
+  ]);
   const trabajo = Promise.all([latir(() => Date.now() < hasta), limpieza, avisos]).then(() => undefined);
   // Si el entorno deja seguir trabajando después de responder, se
   // responde al tiro; si no, la respuesta espera al último latido.

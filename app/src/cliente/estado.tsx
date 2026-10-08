@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
 import { api } from '../api';
+import { recordarCarrito } from '../notificaciones';
 
 /**
  * Carro y datos del cliente, guardados en el teléfono.
@@ -116,6 +117,15 @@ export function ProveedorCliente({ children, telefono, cuentaId }: {
   const CLAVE_PEDIDOS = `feria.mis-pedidos.${cuentaId}`;
 
   const [carro, setCarro] = useState<Record<string, number>>({});
+
+  // El recordatorio del carrito sigue al carrito: se reprograma con
+  // cada cambio y desaparece cuando queda vacío (o se paga, que lo
+  // vacía). Con un respiro, para no reprogramar en cada toque.
+  const enCarro = Object.values(carro).reduce((a, b) => a + b, 0);
+  useEffect(() => {
+    const t = setTimeout(() => { void recordarCarrito(enCarro); }, 1500);
+    return () => clearTimeout(t);
+  }, [enCarro]);
   const [perfil, setPerfil] = useState<Perfil>(PERFIL_INICIAL);
   const [misPedidos, setMisPedidos] = useState<string[]>([]);
   const [feriaId, setFeriaId] = useState(FERIA_INICIAL);

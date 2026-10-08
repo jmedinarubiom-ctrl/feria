@@ -382,16 +382,26 @@ ficha y las notas para la revisión. Lo que hay en el código:
 
 ## Notificaciones
 
-Avisos push por Expo: feriante (oferta), repartidor (viaje), operador
-(autogestión) y, desde octubre de 2026, el comprador (pedido
-recibido, en camino, entregado, cancelado; `avisoAlCliente` en
-`realtime/push.ts`). En Android pasan por Firebase: proyecto
-`feria-app-e6ce6`, `app/google-services.json` (no es secreto, va en
-el repositorio). Falta, del lado de Juan Manuel, subir la clave de la
-cuenta de servicio (FCM V1) en expo.dev → Credentials → Android: sin
-eso el teléfono se registra pero Expo no puede enviar. No funcionan
-en Expo Go ni en el simulador, solo en una APK instalada. Sin probar
-en un teléfono todavía.
+Avisos push por Expo (`realtime/push.ts`). En Android pasan por
+Firebase: proyecto `feria-app-e6ce6`, `app/google-services.json` (no
+es secreto) y la clave FCM V1 subida a Expo. No funcionan en Expo Go
+ni en el simulador, solo en una app instalada. **Nadie las ha visto
+llegar a un teléfono todavía.**
+
+| A quién | Cuándo |
+|---|---|
+| Feriante | Oferta nueva · un repartidor va a retirar · pedido cancelado · le pagaron lo del día · recordatorio si aceptó hace 15 min y no marcó listo |
+| Repartidor | Viaje disponible · pedido cancelado · recordatorio si tomó el viaje hace 20 min y no retiró |
+| Comprador | Pago recibido · en camino · entregado · cancelado · venció sin pago · recordatorio a mitad del plazo de pago (8 de 20 min) · carrito sin terminar (a las 2 h) |
+| Operador | Pedido sin feriante (push) y las alarmas por correo |
+
+- Los recordatorios por reloj (`enviarRecordatorios`) corren cada
+  minuto con el latido y salen una sola vez (tabla `alertas`).
+- El del **carrito** es local: lo programa el propio teléfono
+  (`recordarCarrito` en `app/src/notificaciones.ts`), porque el
+  servidor no conoce el carrito hasta que es pedido.
+- Al comprador se le pide el permiso al abrir el carrito con
+  productos y en el seguimiento, no al abrir la app.
 
 ## Android
 

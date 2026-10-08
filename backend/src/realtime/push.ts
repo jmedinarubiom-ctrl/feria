@@ -1,5 +1,6 @@
 import { consultarUno, consultar, ejecutar, type Fila } from '../db/index.ts';
 import { bus, type Mensaje } from './bus.ts';
+import { CONFIG } from '../config.ts';
 
 /**
  * Notificaciones push por la API de Expo.
@@ -223,7 +224,175 @@ const PARA_EL_CLIENTE: Record<string, (numero: number) => { title: string; body:
   EN_RUTA: (n) => ({ title: `Tu pedido #${n} va en camino`, body: 'El repartidor ya salió de la feria.' }),
   ENTREGADO: (n) => ({ title: `Pedido #${n} entregado`, body: '¡Que lo disfrutes! Gracias por comprar en la feria.' }),
   CANCELADO: (n) => ({ title: `Tu pedido #${n} se canceló`, body: 'Si ya habías pagado, te devolvemos el dinero.' }),
+  EXPIRADO: (n) => ({ title: `Tu pedido #${n} venció`, body: 'No alcanzamos a recibir el pago. Puedes armarlo de nuevo cuando quieras.' }),
 };
+
+// ============================================================
+// Avisos de los puntos críticos, para quien vende y quien reparte
+// ============================================================
+
+/**
+ * El pedido se canceló: que nadie siga trabajando en él.
+ *
+ * Es el aviso más caro de perder: un feriante que no se entera sigue
+ * apartando mercadería, y un repartidor sigue camino a una casa
+ * donde ya no esperan nada.
+ */
+export async function avisosDeCancelacion(
+  m: Extract<Mensaje, { tipo: 'pedido:cancelado' }>,
+): Promise<MensajePush[]> {
+  const avisos: MensajePush[] = [];
+  for (const ferianteId of m.ferianteIds ?? []) {
+    const f = await consultarUno<Fila>('SELECT push_token FROM feriantes WHERE id = ?', ferianteId);
+    if (!f?.push_token) continue;
+    avisos.push({
+      to: f.push_token,
+      title: `Pedido #${m.numero} cancelado`,
+      body: 'No lo sigas preparando. Lo que ya apartaste se te paga igual.',
+      sound: 'default', priority: 'high', channelId: 'ofertas',
+      data: { tipo: 'cancelado', pedidoId: m.pedidoId },
+    });
+  }
+  const r = await consultarUno<Fila>(
+    `SELECT r.push_token FROM viajes v JOIN repartidores r ON r.id = v.repartidor_id
+      WHERE v.pedido_id = ? ORDER BY v.creado_at DESC LIMIT 1`, m.pedidoId);
+  if (r?.push_token) {
+    avisos.push({
+      to: r.push_token,
+      title: `Pedido #${m.numero} cancelado`,
+      body: 'No sigas la ruta. El viaje se te paga según lo que alcanzaste a hacer; habla con la operación.',
+      sound: 'default', priority: 'high', channelId: 'viajes',
+      data: { tipo: 'cancelado', pedidoId: m.pedidoId },
+    });
+  }
+  return avisos;
+}
+
+/** Un repartidor tomó el viaje: los puestos saben quién va a retirar. */
+export async function avisosDeRetiro(
+  m: Extract<Mensaje, { tipo: 'viaje:cambio' }>,
+): Promise<MensajePush[]> {
+  if (m.estado !== 'ASIGNADO' || !m.repartidorId) return [];
+  const viaje = await consultarUno<Fila>(
+    `SELECT p.id AS pedido_id, p.numero, r.nombre AS repartidor
+       FROM viajes v JOIN pedidos p ON p.id = v.pedido_id
+       JOIN repartidores r ON r.id = v.repartidor_id
+      WHERE v.id = ?`, m.viajeId);
+  if (!viaje) return [];
+  const puestos = await consultar<Fila>(
+    `SELECT DISTINCT f.push_token FROM sub_pedidos s JOIN feriantes f ON f.id = s.feriante_id
+      WHERE s.pedido_id = ? AND s.estado IN ('ACEPTADO', 'LISTO') AND f.push_token IS NOT NULL`,
+    viaje.pedido_id);
+  const nombre = String(viaje.repartidor).split(' ')[0];
+  return puestos.map((f) => ({
+    to: f.push_token,
+    title: `${nombre} va a retirar el pedido #${viaje.numero}`,
+    body: 'Tenlo a mano para entregárselo.',
+    sound: 'default' as const, priority: 'high' as const, channelId: 'ofertas',
+    data: { tipo: 'retiro', pedidoId: viaje.pedido_id },
+  }));
+}
+
+/** El operador registró el pago del día: el feriante lo confirma en su app. */
+export async function avisarPagoAlFeriante(ferianteId: string, monto: number): Promise<void> {
+  const f = await consultarUno<Fila>('SELECT push_token FROM feriantes WHERE id = ?', ferianteId);
+  if (!f?.push_token || !(monto > 0)) return;
+  await enviarPush([{
+    to: f.push_token,
+    title: `Te pagaron ${clp(monto)}`,
+    body: 'Es lo de hoy. Confírmalo en la app cuando lo tengas en la mano.',
+    sound: 'default', priority: 'high', channelId: 'ofertas',
+    data: { tipo: 'pago' },
+  }]);
+}
+
+/**
+ * Recordatorios que dependen del reloj, no de un evento.
+ *
+ * Se revisan una vez por minuto, colgados del latido del motor. Cada
+ * uno sale UNA vez (tabla `alertas`): un recordatorio que insiste es
+ * la forma más rápida de que alguien apague las notificaciones.
+ */
+export async function enviarRecordatorios(): Promise<number> {
+  const pendientes: Array<{ clave: string; aviso: MensajePush }> = [];
+
+  // El comprador armó el pedido y no pagó: a mitad del plazo.
+  const mitad = Math.max(2, Math.round(CONFIG.minutosParaPagar * 0.4));
+  const sinPagar = await consultar<Fila>(
+    `SELECT p.id, p.numero, c.push_token,
+            GREATEST(1, ?::int - (extract(epoch FROM now() - p.creado_at) / 60)::int) AS quedan
+       FROM pedidos p JOIN clientes c ON c.id = p.cliente_id
+      WHERE p.estado = 'PENDIENTE_PAGO' AND c.push_token IS NOT NULL
+        AND p.creado_at < now() - make_interval(mins => ?)
+        AND p.creado_at > now() - make_interval(mins => ?)`,
+    CONFIG.minutosParaPagar, mitad, CONFIG.minutosParaPagar);
+  for (const p of sinPagar) {
+    pendientes.push({
+      clave: `recordatorio:pago:${p.id}`,
+      aviso: {
+        to: p.push_token,
+        title: `Tu pedido #${p.numero} espera el pago`,
+        body: `Te lo guardamos ${p.quedan} ${p.quedan === 1 ? 'minuto' : 'minutos'} más. Entra y termina de pagar.`,
+        sound: 'default', priority: 'high', channelId: 'pedidos',
+        data: { tipo: 'pedido', pedidoId: p.id },
+      },
+    });
+  }
+
+  // El feriante aceptó hace rato y no marcó listo: el repartidor no
+  // sale hasta que todos los puestos avisan.
+  const demorados = await consultar<Fila>(
+    `SELECT s.id, p.numero, f.push_token
+       FROM sub_pedidos s JOIN pedidos p ON p.id = s.pedido_id
+       JOIN feriantes f ON f.id = s.feriante_id
+      WHERE s.estado = 'ACEPTADO' AND f.push_token IS NOT NULL
+        AND s.aceptado_at < now() - make_interval(mins => ?)
+        AND s.aceptado_at > now() - interval '3 hours'`,
+    Number(process.env.RECORDATORIO_LISTO_MINUTOS ?? 15));
+  for (const s of demorados) {
+    pendientes.push({
+      clave: `recordatorio:listo:${s.id}`,
+      aviso: {
+        to: s.push_token,
+        title: `¿Está listo el pedido #${s.numero}?`,
+        body: 'Márcalo listo en la app para que salga el repartidor.',
+        sound: 'default', priority: 'high', channelId: 'ofertas',
+        data: { tipo: 'recordatorio' },
+      },
+    });
+  }
+
+  // Un viaje tomado que no avanza: el repartidor aceptó y no retiró.
+  const quietos = await consultar<Fila>(
+    `SELECT v.id, p.numero, r.push_token
+       FROM viajes v JOIN pedidos p ON p.id = v.pedido_id
+       JOIN repartidores r ON r.id = v.repartidor_id
+      WHERE v.estado = 'ASIGNADO' AND r.push_token IS NOT NULL
+        AND COALESCE(v.asignado_at, v.creado_at) < now() - make_interval(mins => ?)
+        AND COALESCE(v.asignado_at, v.creado_at) > now() - interval '3 hours'`,
+    Number(process.env.RECORDATORIO_RETIRO_MINUTOS ?? 20));
+  for (const v of quietos) {
+    pendientes.push({
+      clave: `recordatorio:retiro:${v.id}`,
+      aviso: {
+        to: v.push_token,
+        title: `El pedido #${v.numero} te espera en la feria`,
+        body: 'Los puestos ya lo tienen listo para retirar.',
+        sound: 'default', priority: 'high', channelId: 'viajes',
+        data: { tipo: 'recordatorio' },
+      },
+    });
+  }
+
+  const nuevos: MensajePush[] = [];
+  for (const r of pendientes) {
+    const puesto = await ejecutar(
+      'INSERT INTO alertas (clave, texto) VALUES (?, ?) ON CONFLICT (clave) DO NOTHING', r.clave, r.aviso.title);
+    if (puesto.afectadas === 1) nuevos.push(r.aviso);
+  }
+  if (nuevos.length) await enviarPush(nuevos);
+  return nuevos.length;
+}
 
 export async function avisoAlCliente(pedidoId: string, estado: string): Promise<MensajePush | null> {
   const texto = PARA_EL_CLIENTE[estado];
@@ -256,6 +425,10 @@ export function iniciarNotificaciones(): void {
           await enviarPush(await avisosDeViaje(m));
         } else if (m.tipo === 'autogestion:nueva') {
           await enviarPush(await avisosDeAutogestion(m));
+        } else if (m.tipo === 'pedido:cancelado') {
+          await enviarPush(await avisosDeCancelacion(m));
+        } else if (m.tipo === 'viaje:cambio') {
+          await enviarPush(await avisosDeRetiro(m));
         } else if (m.tipo === 'pedido:cambio') {
           // La cancelación también llega como `pedido:cambio`: mirar
           // además `pedido:cancelado` mandaría el aviso dos veces.

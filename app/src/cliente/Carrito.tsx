@@ -10,6 +10,7 @@ import { Foto } from '../producto';
 import { simboloProducto } from '../simbolos';
 import { useCliente } from './estado';
 import { Icono } from '../iconos';
+import { activarPush } from '../notificaciones';
 
 /** El carro, con la cotización que hace el servidor. */
 export default function Carrito({
@@ -19,6 +20,15 @@ export default function Carrito({
   volver: () => void;
 }) {
   const { carro, fijarCantidad, vaciar, unidades, feriaId } = useCliente();
+
+  // Con productos en el carrito tiene sentido pedir permiso para
+  // avisar: «tu carrito te espera», «tu pedido va en camino». Antes
+  // se pedía recién en el seguimiento, y quien dejaba el carrito a
+  // medias nunca llegaba ahí.
+  const hayProductos = unidades > 0;
+  useEffect(() => {
+    if (hayProductos) void activarPush('cliente').catch(() => {});
+  }, [hayProductos]);
   const inset = useSafeAreaInsets();
   const [catalogo, setCatalogo] = useState<any[] | null>(null);
   const [cotizacion, setCotizacion] = useState<any>(null);
