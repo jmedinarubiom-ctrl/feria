@@ -47,6 +47,16 @@ nadie más puede hacerlo.
    lo pongo en `eas.json` como `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` y en
    `GOOGLE_CLIENT_IDS` del servidor. Sin él, en iPhone se entra con
    Apple o con correo, que alcanza para publicar.
+4 bis. **Tú: la llave de «Sign in with Apple»**, para poder revocar
+   el permiso al eliminar una cuenta. En developer.apple.com →
+   Certificates, Identifiers & Profiles → Keys → «+» → marca «Sign in
+   with Apple» y elige `cl.feria.app`. Se descarga un archivo `.p8`
+   **una sola vez**. En `backend/.env` van tres datos:
+   `APPLE_TEAM_ID` (arriba a la derecha en la cuenta, 10 caracteres),
+   `APPLE_KEY_ID` (el de la llave, 10 caracteres) y
+   `APPLE_PRIVATE_KEY` (el contenido del `.p8`, es secreto: lo pones
+   tú, en una sola línea con `\n` en vez de cada salto). Después,
+   `./desplegar-supabase.sh`.
 5. **Compilar** (pide tu usuario de Apple en la terminal; EAS crea
    solo los certificados y la llave de notificaciones):
 
@@ -129,10 +139,11 @@ terceros para publicidad.
 - **Probar fuera de horario**: si el revisor intenta pagar un día
   sin feria, no va a poder. Está explicado en las notas; si aun así
   lo rechazan, se le puede abrir la feria ese día desde el panel.
-- **Revocar el acceso de Apple al eliminar la cuenta**: Apple pide
-  que, al eliminar una cuenta creada con «Iniciar sesión con Apple»,
-  la app revoque ese permiso. Hoy la cuenta se borra pero no se
-  revoca; hacerlo necesita una llave que se crea con la cuenta de
-  desarrollador. Queda como pendiente para cuando exista.
+- **Revocar el acceso de Apple al eliminar la cuenta**: ya está
+  programado (`backend/src/dominio/apple.ts`). Al entrar con Apple se
+  guarda el permiso, cifrado, y al eliminar la cuenta se le devuelve
+  a Apple. Queda apagado hasta que existan tres datos de la cuenta
+  de desarrollador (ver el paso 4 bis). Probado con un Apple
+  simulado, no contra Apple de verdad.
 - **Boleta y Mercado Pago de producción**: no los revisa Apple, pero
   la app no debería publicarse cobrando con credenciales de prueba.

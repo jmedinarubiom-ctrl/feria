@@ -98,7 +98,11 @@ function BotonApple({ alEntrar, alFallar }: Props) {
       const nombre = [c.fullName?.givenName, c.fullName?.familyName].filter(Boolean).join(' ');
       alEntrar(await api('POST', '/auth/externo', {
         sinSesion: true,
-        cuerpo: { proveedor: 'apple', idToken: c.identityToken, nombre, dispositivo: dispositivo() },
+        cuerpo: {
+          proveedor: 'apple', idToken: c.identityToken, nombre, dispositivo: dispositivo(),
+          // Para poder revocar el permiso si después elimina su cuenta.
+          codigoAutorizacion: c.authorizationCode ?? undefined,
+        },
       }));
     } catch (err: any) {
       // Cerrar la hoja de Apple no es un error que haya que mostrar.

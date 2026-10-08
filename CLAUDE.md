@@ -364,6 +364,13 @@ ficha y las notas para la revisión. Lo que hay en el código:
   eliminar cuenta): `node --env-file=.env herramientas/sitio.mjs`.
   Hay que publicarlo en algún hosting; la función de Supabase no
   sirve HTML.
+- **Revocar el permiso de Apple** al eliminar una cuenta creada con
+  su botón: `dominio/apple.ts`. La app manda el `authorizationCode`,
+  el servidor lo cambia por el refresh token y lo guarda cifrado
+  (`clientes.apple_permiso`, AES-GCM con llave derivada de
+  `FERIA_SECRETO`); al eliminar la cuenta se revoca. Apagado hasta
+  definir `APPLE_TEAM_ID`, `APPLE_KEY_ID` y `APPLE_PRIVATE_KEY`.
+  Las cuentas que se vacían solas por inactividad no revocan.
 - `APPLE_CLIENT_IDS=cl.feria.app`; falta el cliente de Google para
   iOS (`EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`).
 - Falta la cuenta Apple Developer de Juan Manuel: sin ella no se

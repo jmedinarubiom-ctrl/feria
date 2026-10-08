@@ -63,6 +63,7 @@ import {
 } from '../dominio/archivos.ts';
 import { leerReferencia, creditos } from '../dominio/referencia.ts';
 import { latir } from '../motor.ts';
+import { guardarPermisoApple, permisoAppleDe, revocarPermisoApple } from '../dominio/apple.ts';
 import { erroresRecientes, registrarError, revisarYAvisar, silencioDelMotor } from '../dominio/alertas.ts';
 import { iniciarComprobantes } from '../dominio/comprobante.ts';
 import { comoEscuchar, iniciarDifusion } from '../realtime/difusion.ts';
@@ -257,6 +258,12 @@ POST('/auth/externo', async (c) => {
   const quien = await verificarTokenExterno(
     c.cuerpo?.proveedor, c.cuerpo?.idToken, c.cuerpo?.nombre);
   const s = await crearSesionExterna(quien, c.cuerpo?.dispositivo);
+  // Con Apple llega además un código de un solo uso: se cambia por
+  // el permiso que habrá que devolverle si la persona elimina su
+  // cuenta. No traba el ingreso si falla.
+  if (quien.proveedor === 'apple' && s.rol === 'cliente') {
+    await guardarPermisoApple(s.actorId, c.cuerpo?.codigoAutorizacion);
+  }
   return {
     token: s.token, rol: s.rol, actorId: s.actorId, nombre: s.nombre, expiraAt: s.expiraAt,
   };
@@ -407,7 +414,12 @@ POST('/cliente/eliminar-cuenta', async (c) => {
   if (c.cuerpo?.confirmo !== 'ELIMINAR') {
     throw new ErrorHttp(422, 'Falta confirmar.');
   }
-  return eliminarCuentaCliente(id);
+  // El permiso de Apple se lee antes —después ya no hay cuenta de
+  // dónde leerlo— y se revoca solo si la cuenta se eliminó de verdad.
+  const permiso = await permisoAppleDe(id);
+  const r = await eliminarCuentaCliente(id);
+  const revocado = await revocarPermisoApple(permiso);
+  return { ...r, ...(permiso ? { appleRevocado: revocado } : {}) };
 });
 
 // ============================================================
