@@ -105,6 +105,23 @@ export async function buscarServidor(): Promise<void> {
  */
 export const sinSocket = (): boolean => base.includes('/functions/v1/');
 
+/**
+ * La dirección completa de una ruta del servidor.
+ *
+ * Cuando el servidor es una función de Supabase, se le pide que
+ * corra en la misma región que la base de datos. Por defecto la
+ * función corre cerca de quien llama (São Paulo) y la base está en
+ * otra parte: cada consulta cruzaba el continente, y una pantalla
+ * que hace diez consultas tardaba tres segundos. Corriendo junto a
+ * la base, el viaje largo se hace una sola vez por petición.
+ */
+const REGION = process.env.EXPO_PUBLIC_FERIA_REGION;
+export const direccion = (camino: string): string => {
+  const url = servidor() + camino;
+  if (!REGION || !sinSocket()) return url;
+  return url + (url.includes('?') ? '&' : '?') + 'forceFunctionRegion=' + REGION;
+};
+
 // Se mantienen por compatibilidad con lo que ya las usa. `servidor()`
 // es la que refleja un cambio hecho a mano.
 export const HOST = detectarHost();
@@ -181,7 +198,7 @@ export async function api(
   camino: string,
   opciones: { cuerpo?: unknown; sinSesion?: boolean } = {},
 ): Promise<any> {
-  const r = await pedir(servidor() + camino, {
+  const r = await pedir(direccion(camino), {
     method: metodo,
     headers: {
       'content-type': 'application/json',

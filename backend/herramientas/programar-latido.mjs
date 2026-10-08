@@ -9,7 +9,11 @@ import pg from 'pg';
 const { DATABASE_URL, FERIA_MOTOR_SECRETO } = process.env;
 if (!DATABASE_URL || !FERIA_MOTOR_SECRETO) throw new Error('Faltan DATABASE_URL o FERIA_MOTOR_SECRETO');
 const ref = new URL(DATABASE_URL).username.split('.')[1];
-const url = `https://${ref}.supabase.co/functions/v1/api/interno/latir`;
+// La función late en la misma región que la base (FERIA_REGION):
+// cada latido son varias consultas, y con la función lejos de la
+// base cada una cruza el continente.
+const region = process.env.FERIA_REGION ?? new URL(DATABASE_URL).hostname.match(/aws-\d+-([a-z0-9-]+)\.pooler/)?.[1];
+const url = `https://${ref}.supabase.co/functions/v1/api/interno/latir${region ? `?forceFunctionRegion=${region}` : ''}`;
 
 const db = new pg.Client({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
 await db.connect();
