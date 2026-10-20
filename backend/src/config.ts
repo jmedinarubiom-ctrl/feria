@@ -185,8 +185,9 @@ export const CONFIG = {
   pais: process.env.PAIS_ISO ?? 'cl',
   /** Punto de la feria: a donde cae un pedido que no se pudo ubicar. */
   puntoFeria: {
-    lat: Number(process.env.FERIA_LAT ?? -33.0472),
-    lng: Number(process.env.FERIA_LNG ?? -71.6127),
+    // Av. Argentina entre Rancagua y Victoria (Valparaíso).
+    lat: Number(process.env.FERIA_LAT ?? -33.0500),
+    lng: Number(process.env.FERIA_LNG ?? -71.6028),
   },
 
   puerto: Number(process.env.PORT ?? 4000),
