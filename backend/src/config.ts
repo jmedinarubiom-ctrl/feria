@@ -82,8 +82,12 @@ export const CONFIG = {
      * de los casos.
      */
     factorCalle: Number(process.env.REPARTO_FACTOR_CALLE ?? 1.45),
-    /** Más lejos que esto (km por calle) no se reparte. */
-    maxKm: Number(process.env.REPARTO_MAX_KM ?? 18),
+    /**
+     * Más lejos que esto (km por calle) no se reparte. Cada feria
+     * atiende su zona: pasados los 10 km el despacho supera los
+     * $6.000 y es mejor que lo lleve una feria más cercana.
+     */
+    maxKm: Number(process.env.REPARTO_MAX_KM ?? 10),
   },
 
 

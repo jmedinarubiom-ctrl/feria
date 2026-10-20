@@ -156,3 +156,34 @@ export async function actualizarFeria(id: string, cambio: CambioFeria) {
   }
   return paraLaApp((await feriaPorId(id))!);
 }
+
+/**
+ * Las ferias ordenadas por cercanía a un punto.
+ *
+ * Es lo que permite que la app elija sola la feria: con la ubicación
+ * del teléfono se queda con la feria abierta más cercana que reparte
+ * hasta ahí. Solo cuentan las ferias con ubicación conocida.
+ */
+export async function feriasPorCercania(punto: { lat: number; lng: number }) {
+  const { kmPorCalle } = await import('./tarifas.ts');
+  const { CONFIG } = await import('../config.ts');
+  const filas = await consultar<Fila>('SELECT * FROM ferias WHERE lat IS NOT NULL AND lng IS NOT NULL');
+  return filas
+    .map((f) => {
+      const km = kmPorCalle({ lat: f.lat, lng: f.lng }, punto);
+      return { ...paraLaApp(f), km, enZona: km <= CONFIG.reparto.maxKm };
+    })
+    .sort((a, b) => a.km - b.km);
+}
+
+/** La feria que le corresponde a un punto: la abierta más cercana que llega hasta ahí. */
+export async function feriaParaUbicacion(punto: { lat: number; lng: number }) {
+  const todas = await feriasPorCercania(punto);
+  const elegida = todas.find((f) => f.activa && f.enZona) ?? null;
+  return {
+    elegida,
+    // Si no hay ninguna, la más cercana igual: para decirle a cuánto queda.
+    masCercana: todas.find((f) => f.activa) ?? todas[0] ?? null,
+    ferias: todas,
+  };
+}

@@ -445,7 +445,19 @@ iguales). `pedidos.distancia_km` guarda la distancia cobrada;
 `ferias.lat/lng` (migraciones 018 y 019). Solo Av. Argentina tiene
 la ubicación confirmada; las demás tienen un punto APROXIMADO y
 `ubicacion_revisada = false`: no se pueden abrir hasta que el
-operador confirme la ubicación en el panel (Ferias).
+operador confirme la ubicación en el panel (Ferias). (Migración 020
+ya dejó confirmadas Av. Argentina, Molino Prat, Peña Blanca y Gómez
+Carreño 5°.)
+
+**Tope y feria por ubicación**: `maxKm` = 10 km por calle; más lejos
+no se reparte. La app pide la ubicación al abrir y elige sola la
+feria activa más cercana que llega (`GET /ferias/cercana`,
+`feriaParaUbicacion`), sin vaciar el carro. Si el cliente elige a
+mano, queda en modo «mano» (`feria.elegida.modo`) y puede volver con
+«Usar mi ubicación». Al pagar manda el punto de entrega: `/cotizar`
+devuelve `sugerida` si para esa dirección hay otra feria que reparte
+y queda ≥1,5 km más cerca (o la elegida no llega), y Pago ofrece el
+cambio conservando el carro.
 
 **Pago a repartidores** (migración 019, `liquidaciones_reparto`):
 igual que con los feriantes. Gana la tarifa de cada viaje entregado

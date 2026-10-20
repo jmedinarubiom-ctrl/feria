@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import * as Location from 'expo-location';
 
 import { api } from '../api';
 import { recordarCarrito } from '../notificaciones';
@@ -60,11 +61,39 @@ type Estado = {
 
   /** La feria en la que compra. Se recuerda entre una vez y otra. */
   feriaId: string;
-  elegirFeria: (id: string) => void;
+  /**
+   * Cambia de feria. A mano, deja de elegirse sola. `conservarCarro`
+   * es para cuando el cambio lo pide la dirección de entrega: el
+   * catálogo y los precios son los mismos en todas.
+   */
+  elegirFeria: (id: string, opciones?: { conservarCarro?: boolean }) => void;
+  /** Cómo se eligió la feria, para decírselo al cliente. */
+  ubicacionFeria: UbicacionFeria;
+  /** Vuelve a elegir la feria por la ubicación del teléfono. */
+  ubicarFeria: () => Promise<void>;
 
   /** Ids de los pedidos hechos desde este teléfono, del más nuevo al más viejo. */
   misPedidos: string[];
   registrarPedido: (pedidoId: string) => Promise<void>;
+};
+
+export type UbicacionFeria = {
+  /** 'auto': la eligió la ubicación; 'mano': la eligió el cliente. */
+  modo: 'auto' | 'mano';
+  /** Buscando la ubicación ahora mismo. */
+  buscando: boolean;
+  /** Km por calle hasta la feria elegida, si se sabe dónde está. */
+  km: number | null;
+  /** Ninguna feria abierta reparte hasta donde está. */
+  fueraDeZona: boolean;
+  /** La feria más cercana aunque no reparta ahí, para decir a cuánto queda. */
+  masCercana: { nombre: string; km: number } | null;
+  /** No dio permiso de ubicación. */
+  sinPermiso: boolean;
+};
+
+const UBICACION_INICIAL: UbicacionFeria = {
+  modo: 'auto', buscando: false, km: null, fueraDeZona: false, masCercana: null, sinPermiso: false,
 };
 
 const Ctx = createContext<Estado | null>(null);
@@ -72,6 +101,7 @@ const Ctx = createContext<Estado | null>(null);
 /** Las copias de antes, sin dueño. Se borran al entrar. */
 const CLAVES_VIEJAS = ['feria.perfil', 'feria.mis-pedidos'];
 const CLAVE_FERIA = 'feria.elegida';
+const CLAVE_MODO_FERIA = 'feria.elegida.modo';
 export const FERIA_INICIAL = 'feria-av-argentina';
 
 const leer = async (clave: string): Promise<string | null> => {
@@ -129,6 +159,44 @@ export function ProveedorCliente({ children, telefono, cuentaId }: {
   const [perfil, setPerfil] = useState<Perfil>(PERFIL_INICIAL);
   const [misPedidos, setMisPedidos] = useState<string[]>([]);
   const [feriaId, setFeriaId] = useState(FERIA_INICIAL);
+  const [ubicacionFeria, setUbicacionFeria] = useState<UbicacionFeria>(UBICACION_INICIAL);
+
+  /**
+   * Elige la feria por dónde está el teléfono: la abierta más cercana
+   * que reparte hasta ahí. Pide el permiso una vez; si no lo da, se
+   * queda con la que tenía y puede elegirla a mano.
+   */
+  const ubicarFeria = async () => {
+    setUbicacionFeria((u) => ({ ...u, modo: 'auto', buscando: true }));
+    void escribir(CLAVE_MODO_FERIA, 'auto');
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setUbicacionFeria((u) => ({ ...u, buscando: false, sinPermiso: true }));
+        return;
+      }
+      // La última conocida sale al instante; si no hay, una nueva.
+      const pos = await Location.getLastKnownPositionAsync({ maxAge: 10 * 60_000 })
+        ?? await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const r = await api('GET',
+        `/ferias/cercana?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`);
+      if (r.elegida) {
+        setFeriaId(r.elegida.id);
+        void escribir(CLAVE_FERIA, r.elegida.id);
+      }
+      setUbicacionFeria({
+        modo: 'auto',
+        buscando: false,
+        km: r.elegida?.km ?? null,
+        fueraDeZona: !r.elegida,
+        masCercana: r.masCercana ? { nombre: r.masCercana.nombre, km: r.masCercana.km } : null,
+        sinPermiso: false,
+      });
+    } catch {
+      // Sin GPS o sin señal: sigue con la feria que tenía.
+      setUbicacionFeria((u) => ({ ...u, buscando: false }));
+    }
+  };
   const [perfilListo, setPerfilListo] = useState(false);
   const [telefonoVerificado, setTelefonoVerificado] = useState<string | null>(null);
 
@@ -154,6 +222,12 @@ export function ProveedorCliente({ children, telefono, cuentaId }: {
       setMisPedidos(ped ? JSON.parse(ped) : []);
       const elegida = await leer(CLAVE_FERIA);
       if (elegida) setFeriaId(elegida);
+      // Salvo que haya elegido a mano, la feria la decide dónde está.
+      if ((await leer(CLAVE_MODO_FERIA)) === 'mano') {
+        setUbicacionFeria({ ...UBICACION_INICIAL, modo: 'mano' });
+      } else {
+        void ubicarFeria();
+      }
 
       try {
         const [yo, mios] = await Promise.all([
@@ -211,13 +285,18 @@ export function ProveedorCliente({ children, telefono, cuentaId }: {
     refrescarCuenta,
 
     feriaId,
-    elegirFeria: (id) => {
+    elegirFeria: (id, opciones) => {
       // El carro es de una feria: los precios son los mismos, pero
-      // el pedido lo prepara y lo reparte esa feria, ese día.
-      if (id !== feriaId) setCarro({});
+      // el pedido lo prepara y lo reparte esa feria, ese día. Si el
+      // cambio viene de la dirección de entrega, el carro se queda.
+      if (id !== feriaId && !opciones?.conservarCarro) setCarro({});
       setFeriaId(id);
       void escribir(CLAVE_FERIA, id);
+      setUbicacionFeria({ ...UBICACION_INICIAL, modo: 'mano' });
+      void escribir(CLAVE_MODO_FERIA, 'mano');
     },
+    ubicacionFeria,
+    ubicarFeria,
 
     misPedidos,
     registrarPedido: async (pedidoId) => {
@@ -225,7 +304,7 @@ export function ProveedorCliente({ children, telefono, cuentaId }: {
       setMisPedidos(lista);
       await escribir(CLAVE_PEDIDOS, JSON.stringify(lista));
     },
-  }), [carro, perfil, misPedidos, feriaId, perfilListo, cuentaId, telefonoVerificado]);
+  }), [carro, perfil, misPedidos, feriaId, ubicacionFeria, perfilListo, cuentaId, telefonoVerificado]);
 
   return <Ctx.Provider value={valor}>{children}</Ctx.Provider>;
 }

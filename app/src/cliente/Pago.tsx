@@ -28,6 +28,7 @@ export default function Pago({
 }) {
   const {
     carro, perfil, guardarPerfil, vaciar, registrarPedido, unidades, feriaId, telefonoVerificado,
+    elegirFeria,
   } = useCliente();
   const [borrador, setBorrador] = useState<Perfil>(perfil);
   const [catalogo, setCatalogo] = useState<any[] | null>(null);
@@ -248,6 +249,33 @@ export default function Pago({
           </View>
         </View>
 
+        {/* El pedido sale de donde se entrega: si para esta dirección
+            reparte otra feria más cerca, se ofrece el cambio sin
+            perder el carro (el catálogo es el mismo). */}
+        {cotizacion?.sugerida ? (
+          <View style={[e.bloque, e.sugerida]}>
+            <Text style={T.destacado}>
+              {cotizacion.fueraDeZona
+                ? `Para esta dirección te lleva ${cotizacion.sugerida.nombre}`
+                : `${cotizacion.sugerida.nombre} queda más cerca de esta dirección`}
+            </Text>
+            <Text style={T.micro}>
+              A {cotizacion.sugerida.km.toFixed(1).replace('.', ',')} km
+              {cotizacion.fueraDeZona ? '' : `, contra ${String(cotizacion.distanciaKm).replace('.', ',')} km de la que elegiste`}.
+              {' '}Tu carrito se mantiene y el despacho sale más barato.
+            </Text>
+            <Pressable
+              onPress={() => elegirFeria(cotizacion.sugerida.id, { conservarCarro: true })}
+              accessibilityRole="button"
+              style={({ pressed }) => [e.botonSugerida, pressed && { opacity: 0.8 }]}
+            >
+              <Text style={[T.micro, { color: '#FFFFFF', fontFamily: T.destacado.fontFamily }]}>
+                Comprar en {cotizacion.sugerida.nombre}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         {cotizacion ? (
           <View style={[e.bloque, { gap: E.s }]}>
             <Text style={T.seccion}>Resumen</Text>
@@ -295,6 +323,7 @@ export default function Pago({
         {cotizacion?.fueraDeZona ? (
           <Text style={[T.micro, { textAlign: 'center', marginTop: E.s, color: C.rojo }]}>
             Esa dirección queda a {String(cotizacion.distanciaKm).replace('.', ',')} km de la feria: repartimos hasta {cotizacion.maxKm} km.
+            {cotizacion.sugerida ? ' Cambia a la feria sugerida arriba.' : ''}
           </Text>
         ) : falta.length ? (
           <Text style={[T.micro, { textAlign: 'center', marginTop: E.s, color: C.naranja }]}>
@@ -369,6 +398,11 @@ async function esperarConfirmacion(
 }
 
 const e = StyleSheet.create({
+  sugerida: { gap: E.s, borderWidth: 1, borderColor: C.verde, backgroundColor: C.verdeSuave },
+  botonSugerida: {
+    alignSelf: 'flex-start', backgroundColor: C.verde,
+    borderRadius: R.pastilla, paddingHorizontal: E.l, paddingVertical: E.s,
+  },
   paso: { flexDirection: 'row', alignItems: 'center', gap: E.s, marginBottom: E.m },
   pasoNumero: {
     width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: C.borde,

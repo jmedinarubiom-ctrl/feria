@@ -58,7 +58,7 @@ import {
 } from '../dominio/gente.ts';
 import { FeriaCerrada } from '../dominio/horario.ts';
 import {
-  listarFerias, vistaDeFeria, feriasConGente, actualizarFeria, dondeAbrirElMapa,
+  listarFerias, vistaDeFeria, feriasConGente, actualizarFeria, dondeAbrirElMapa, feriaParaUbicacion,
 } from '../dominio/ferias.ts';
 import {
   guardarFoto, leerFoto, desdeBase64, MAX_FOTO, ErrorArchivo, guardarEnLaBase, leerDeLaBase,
@@ -536,6 +536,18 @@ GET('/feria/estado', async (c) => ({
 /** Todas las ferias: las que ya reparten y las que vienen. */
 GET('/ferias', async () => ({ ferias: await listarFerias() }));
 
+/**
+ * La feria que le toca a una ubicación. La app la pregunta al abrir,
+ * con el GPS del teléfono, para elegir la feria sola.
+ */
+GET('/ferias/cercana', async (c) => {
+  const lat = Number(c.consulta.get('lat')), lng = Number(c.consulta.get('lng'));
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    throw new ErrorHttp(422, 'Ubicación inválida.');
+  }
+  return feriaParaUbicacion({ lat, lng });
+});
+
 GET('/catalogo', async () => {
   const rubros = await consultar<Fila>('SELECT * FROM rubros ORDER BY nombre');
   return Promise.all(rubros.map(async (r) => ({
@@ -615,7 +627,18 @@ GET('/cotizar/:total', async (c) => {
     destino = await geocodificar(direccion, { ciudad: `${f?.comuna ?? 'Valparaíso'}, Chile` }).catch(() => null);
   }
   const km = destino ? kmPorCalle(await puntoDeFeria(feriaId), destino) : null;
-  return cotizar(Number(c.params.total) || 0, { km, rubros });
+  const cotizacion = await cotizar(Number(c.params.total) || 0, { km, rubros });
+  // El pedido sale de donde se entrega, no de donde estaba el cliente
+  // al abrir la app: si para este punto hay otra feria que reparte y
+  // queda bastante más cerca (o la elegida no llega), se le sugiere.
+  let sugerida = null;
+  if (destino && km != null) {
+    const { elegida } = await feriaParaUbicacion(destino);
+    if (elegida && elegida.id !== feriaId && (km > CONFIG.reparto.maxKm || elegida.km <= km - 1.5)) {
+      sugerida = { id: elegida.id, nombre: elegida.nombre, comuna: elegida.comuna, km: elegida.km };
+    }
+  }
+  return { ...cotizacion, sugerida };
 });
 
 /**

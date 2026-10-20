@@ -20,7 +20,7 @@ import { Icono, iconoDeRubro } from '../iconos';
  * todavía no reparten aparecen como «próximamente».
  */
 export default function Feria({ navegar }: { navegar: (p: string, args?: any) => void }) {
-  const { feriaId, elegirFeria, unidades } = useCliente();
+  const { feriaId, elegirFeria, unidades, ubicacionFeria, ubicarFeria } = useCliente();
   const { datos: feria, error, recargar } =
     useRecurso<any>(`/feria/estado?feria=${encodeURIComponent(feriaId)}`);
   const { datos: todas } = useRecurso<{ ferias: any[] }>('/ferias');
@@ -104,6 +104,29 @@ export default function Feria({ navegar }: { navegar: (p: string, args?: any) =>
       {todas && todas.ferias.length > 1 ? (
         <View style={e.bloque}>
           <Text style={[T.destacado, { marginBottom: E.s }]}>Elige tu feria</Text>
+          <Text style={[T.micro, { marginBottom: E.s }]}>
+            {ubicacionFeria.modo === 'auto' && ubicacionFeria.km != null
+              ? `Elegida por tu ubicación: la más cercana que reparte hasta donde estás (${ubicacionFeria.km.toFixed(1).replace('.', ',')} km).`
+              : ubicacionFeria.sinPermiso
+                ? 'Sin permiso de ubicación: elígela tú, o actívalo en los ajustes del teléfono.'
+                : 'Elegiste esta feria a mano. Al pagar te avisamos si para tu dirección queda otra más cerca.'}
+          </Text>
+          {ubicacionFeria.modo === 'mano' || ubicacionFeria.sinPermiso ? (
+            <Pressable
+              onPress={() => {
+                if (unidades === 0) return void ubicarFeria();
+                Alert.alert('Elegir por tu ubicación',
+                  'Si la feria más cercana es otra, tu carrito se mantiene: los productos y precios son los mismos.',
+                  [{ text: 'Cancelar', style: 'cancel' }, { text: 'Usar mi ubicación', onPress: () => void ubicarFeria() }]);
+              }}
+              accessibilityRole="button"
+              style={({ pressed }) => [e.usarUbicacion, pressed && { opacity: 0.8 }]}
+            >
+              <Text style={[T.micro, { color: C.verdeOscuro, fontFamily: T.destacado.fontFamily }]}>
+                {ubicacionFeria.buscando ? 'Buscando…' : 'Usar mi ubicación'}
+              </Text>
+            </Pressable>
+          ) : null}
           {todas.ferias.map((f) => {
             const elegida = f.id === feriaId;
             return (
@@ -204,6 +227,10 @@ const e = StyleSheet.create({
     position: 'absolute', right: -40, top: -30, opacity: 0.14,
   },
   lugar: { padding: E.l, gap: E.xs, alignItems: 'flex-start' },
+  usarUbicacion: {
+    alignSelf: 'flex-start', marginBottom: E.s, backgroundColor: C.verdeSuave,
+    borderRadius: R.pastilla, paddingHorizontal: E.l, paddingVertical: E.s,
+  },
   verMapa: {
     marginTop: E.xs, backgroundColor: '#FFFFFF',
     borderRadius: R.pastilla, paddingHorizontal: E.l, paddingVertical: E.s,

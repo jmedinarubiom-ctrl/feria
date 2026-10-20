@@ -423,3 +423,24 @@ test('el mapa para elegir el punto se abre en la comuna de la feria del cliente'
   assert.equal(vina.json.lat, -33.0245);
   assert.equal(vina.json.encontrada, false);
 });
+
+test('la feria se sugiere por el punto de entrega, no por donde está el cliente', async () => {
+  // Abrimos Marga Marga, en Viña.
+  const { actualizarFeria } = await import('../src/dominio/ferias.ts');
+  const { ejecutar } = await import('../src/db/index.ts');
+  await ejecutar(`UPDATE feriantes SET feria_id = 'feria-marga-marga' WHERE id = 'f-jose'`);
+  await actualizarFeria('feria-marga-marga', { activa: true, ubicacion: '-33.0250, -71.5440' });
+
+  const cerca = await pedir('GET', '/ferias/cercana?lat=-33.0245&lng=-71.5518');
+  assert.equal(cerca.estado, 200);
+  assert.equal(cerca.json.elegida.id, 'feria-marga-marga');
+
+  // Compra en Av. Argentina pero entrega en Viña centro: se le sugiere Marga Marga.
+  const vina = await pedir('GET', '/cotizar/12000?feria=feria-av-argentina&lat=-33.0245&lng=-71.5518');
+  assert.equal(vina.json.sugerida?.id, 'feria-marga-marga');
+  // Entrega en el plan de Valparaíso: la elegida ya es la que corresponde.
+  const valpo = await pedir('GET', '/cotizar/12000?feria=feria-av-argentina&lat=-33.0430&lng=-71.6270');
+  assert.equal(valpo.json.sugerida, null);
+
+  assert.equal((await pedir('GET', '/ferias/cercana?lat=hola&lng=1')).estado, 422);
+});

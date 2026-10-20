@@ -22,12 +22,15 @@ import { Icono, iconoDeRubro } from '../iconos';
  */
 const BASICOS = ['p-tomate', 'p-papa', 'p-cebolla', 'p-palta', 'p-limon', 'p-platano', 'p-huevos', 'p-lechuga'];
 
+/** «2,3 km». */
+const km = (n: number) => `${n.toFixed(1).replace('.', ',')} km`;
+
 export default function Inicio({ navegar }: { navegar: (p: string, args?: any) => void }) {
   const { datos: catalogo, error, recargar } = useRecurso<any[]>('/catalogo');
   const { feriaId } = useCliente();
   const { datos: feria } = useRecurso<any>(`/feria/estado?feria=${encodeURIComponent(feriaId)}`);
   const [busqueda, setBusqueda] = useState('');
-  const { perfil, unidades, agregar } = useCliente();
+  const { perfil, unidades, agregar, ubicacionFeria } = useCliente();
   const relleno = useRellenoPestanas();
 
   if (error) return <NoCargo error={error} onReintentar={recargar} />;
@@ -124,6 +127,15 @@ export default function Inicio({ navegar }: { navegar: (p: string, args?: any) =
           </Text>
           <Text style={[T.micro, e.portadaCambiar]}>Cambiar</Text>
         </View>
+        {ubicacionFeria.modo === 'auto' && (ubicacionFeria.buscando || ubicacionFeria.km != null || ubicacionFeria.fueraDeZona) ? (
+          <Text style={[T.micro, e.portadaUbicacion]} numberOfLines={2}>
+            {ubicacionFeria.buscando
+              ? 'Buscando la feria más cercana…'
+              : ubicacionFeria.fueraDeZona
+                ? `Todavía no repartimos donde estás${ubicacionFeria.masCercana ? ` (la feria más cercana queda a ${km(ubicacionFeria.masCercana.km)})` : ''}. Puedes comprar igual si entregas en otra dirección.`
+                : `Elegida por tu ubicación · a ${km(ubicacionFeria.km!)}`}
+          </Text>
+        ) : null}
       </Pressable>
 
       <Text style={[T.seccion, { marginBottom: E.m }]}>Rubros</Text>
@@ -221,6 +233,7 @@ const e = StyleSheet.create({
     backgroundColor: C.verde, borderRadius: R.enorme,
     padding: E.xl, marginBottom: E.xl, overflow: 'hidden',
   },
+  portadaUbicacion: { color: 'rgba(255,255,255,0.85)', marginTop: E.s },
   portadaSobre: { color: 'rgba(255,255,255,0.8)', letterSpacing: 0.4, textTransform: 'uppercase' },
   portadaPie: { flexDirection: 'row', alignItems: 'center', gap: E.s, marginTop: E.s },
   portadaEstado: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#7BE0A6' },

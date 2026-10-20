@@ -64,7 +64,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Feria App usa tu ubicación para marcar el punto exacto donde entregar tu pedido y, si repartes, para mostrar por dónde vas mientras llevas uno."
+          "locationWhenInUsePermission": "Feria App usa tu ubicación para elegir la feria más cercana que reparte hasta donde estás, marcar el punto exacto donde entregar tu pedido y, si repartes, para mostrar por dónde vas mientras llevas uno."
         }
       ],
       [

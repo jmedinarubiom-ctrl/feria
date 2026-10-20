@@ -117,33 +117,35 @@ const OPERADORES: Array<[string, string, string]> = [
  * app, más corto que el del localizador (que dice 06:00 a 22:00, y
  * no parece el de una feria de frutas y verduras).
  */
-const FERIAS: Array<[string, string, string, string, number[], string, string, string, boolean]> = [
-  // id, nombre, comuna, calle, días, abre, último pedido, cierra, activa
+const FERIAS: Array<[string, string, string, string, number[], string, string, string, boolean, number, number, boolean]> = [
+  // id, nombre, comuna, calle, días, abre, último pedido, cierra, activa,
+  // lat, lng, ubicación confirmada (ver migración 020)
   [FERIA, 'Feria Av. Argentina', 'Valparaíso',
-    'Av. Argentina, entre Rancagua y Victoria', [3, 6], '07:00', '13:30', '15:00', true],
+    'Av. Argentina, entre Rancagua y Victoria', [3, 6], '07:00', '13:30', '15:00', true, -33.05, -71.6028, true],
   ['feria-marga-marga', 'Feria Estero Marga Marga', 'Viña del Mar',
-    'Lecho del estero Marga Marga', [3, 6], '08:00', '14:30', '16:00', false],
+    'Lecho del estero Marga Marga', [3, 6], '08:00', '14:30', '16:00', false, -33.025, -71.544, false],
   ['feria-gomez-carreno-3', 'Feria Gómez Carreño, tercer sector', 'Viña del Mar',
-    'Av. Pacífico', [2, 5], '08:00', '14:30', '16:00', false],
+    'Av. Pacífico', [2, 5], '08:00', '14:30', '16:00', false, -32.994, -71.5185, false],
   ['feria-gomez-carreno-5', 'Feria Gómez Carreño, quinto sector', 'Viña del Mar',
-    '25 Poniente con 1 Sur', [0, 4], '08:00', '14:30', '16:00', false],
+    '25 Poniente con 1 Sur', [0, 4], '08:00', '14:30', '16:00', false, -32.9884, -71.5274, true],
   ['feria-belloto', 'Feria Municipal El Belloto', 'Quilpué',
-    'Perú 151', [3, 6], '06:00', '15:30', '17:00', false],
+    'Perú 151', [3, 6], '06:00', '15:30', '17:00', false, -33.0478, -71.4086, false],
   ['feria-molino-prat', 'Feria Molino Prat', 'Villa Alemana',
-    'Valencia 275, esquina Aviador Figueroa', [0], '07:00', '15:00', '16:30', false],
+    'Valencia 275, esquina Aviador Figueroa', [0], '07:00', '15:00', '16:30', false, -33.0592, -71.367, true],
   ['feria-pena-blanca', 'Feria Peña Blanca', 'Villa Alemana',
-    'New Memory, esquina Los Crespones', [3, 6], '07:00', '15:00', '16:30', false],
+    'New Memory, esquina Los Crespones', [3, 6], '07:00', '15:00', '16:30', false, -33.0474, -71.3475, true],
 ];
 
 /** Carga las ferias que falten. No pisa lo que el operador ya cambió. */
 export async function sembrarFerias(): Promise<void> {
-  for (const [id, nombre, comuna, calle, dias, abre, ultimo, cierra, activa] of FERIAS) {
+  for (const [id, nombre, comuna, calle, dias, abre, ultimo, cierra, activa, lat, lng, revisada] of FERIAS) {
     await ejecutar(
-      `INSERT INTO ferias (id, nombre, comuna, calle, dias, abre, ultimo_pedido, cierra, activa, fuente)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO ferias (id, nombre, comuna, calle, dias, abre, ultimo_pedido, cierra, activa, fuente,
+                           lat, lng, ubicacion_revisada)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (id) DO NOTHING`,
       id, nombre, comuna, calle, dias, abre, ultimo, cierra, activa,
-      'ODEPA/ASOF, Localizador Nacional de Ferias Libres, agosto 2025');
+      'ODEPA/ASOF, Localizador Nacional de Ferias Libres, agosto 2025', lat, lng, revisada);
   }
 }
 

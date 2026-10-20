@@ -18,7 +18,7 @@ II. Qué datos tratamos
 
 6. Datos técnicos. La dirección IP desde la que se conecta, que se usa por breves momentos para prevenir abusos y no se guarda asociada a su cuenta, y los registros de errores del sistema. La Aplicación no utiliza cookies publicitarias ni herramientas de seguimiento o analítica de terceros.
 
-7. Ubicación. No seguimos la ubicación de quienes compran. Si usted usa la función «marcar mi ubicación», la Aplicación consulta su posición una sola vez, con el permiso de su dispositivo, para fijar el punto de entrega, y guarda únicamente ese punto junto al pedido. Puede revocar el permiso en los ajustes de su teléfono y escribir la dirección a mano.
+7. Ubicación. No seguimos la ubicación de quienes compran. Al abrir la Aplicación, y solo si usted lo autoriza, se consulta su posición para elegir la feria más cercana que reparte hasta ahí; esa posición se envía a nuestros servidores únicamente para ese cálculo y no se guarda. Si usted usa la función «marcar mi ubicación», la Aplicación consulta su posición una sola vez, con el permiso de su dispositivo, para fijar el punto de entrega, y guarda únicamente ese punto junto al pedido. Puede revocar el permiso en los ajustes de su teléfono y escribir la dirección a mano.
 
 8. Datos que no tratamos. No solicitamos ni tratamos datos sensibles, tales como los relativos a salud, origen étnico, creencias, afiliación política o datos biométricos. La Aplicación no está dirigida a menores de 18 años y no recopilamos a sabiendas sus datos; si usted cree que un menor nos ha entregado datos, escríbanos para eliminarlos.
 

@@ -91,3 +91,23 @@ test('el repartidor ve lo que ganó, el operador le paga y él lo confirma', asy
   const despues = await calcularGananciaRepartidor('r-diego');
   assert.equal(despues.pendiente, despues.total - pagado.total);
 });
+
+test('la feria se elige sola por la ubicación: la abierta más cercana que llega hasta ahí', async () => {
+  const { feriaParaUbicacion } = await import('../src/dominio/ferias.ts');
+  const { CONFIG } = await import('../src/config.ts');
+  // Cerro Alegre, Valparaíso: le toca Av. Argentina (la única abierta).
+  const valpo = await feriaParaUbicacion({ lat: -33.0430, lng: -71.6270 });
+  assert.equal(valpo.elegida?.id, 'feria-av-argentina');
+  assert.ok(valpo.elegida!.km < 5);
+
+  // Abrimos Marga Marga: desde Viña centro le toca esa y no Valparaíso.
+  await ejecutar(`UPDATE feriantes SET feria_id = 'feria-marga-marga' WHERE id = 'f-jose'`);
+  await actualizarFeria('feria-marga-marga', { activa: true, ubicacion: '-33.0250, -71.5440' });
+  const vina = await feriaParaUbicacion({ lat: -33.0245, lng: -71.5518 });
+  assert.equal(vina.elegida?.id, 'feria-marga-marga');
+
+  // Villa Alemana: ninguna abierta llega hasta allá.
+  const lejos = await feriaParaUbicacion({ lat: -33.0422, lng: -71.3733 });
+  assert.equal(lejos.elegida, null);
+  assert.ok(lejos.masCercana && lejos.masCercana.km > CONFIG.reparto.maxKm);
+});
