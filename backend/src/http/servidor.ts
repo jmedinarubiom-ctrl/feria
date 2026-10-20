@@ -6,6 +6,9 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 
 import { CONFIG } from '../config.ts';
+import {
+  armarRuta, cargarCamion, pendientesDeRuta, programadoDisponible, rutaActiva, rutasDeHoy,
+} from '../dominio/rutas.ts';
 import { abrirDB, cerrarDB, consultar, consultarUno, ejecutar, nombreMotor, type Fila } from '../db/index.ts';
 import { sembrar, FERIA_ID } from '../db/semilla.ts';
 import {
@@ -602,6 +605,7 @@ POST('/pedidos', async (c) => {
     precisionM: Number(b.precisionM),
     notas: typeof b.notas === 'string' ? b.notas : null,
     items: b.items,
+    modalidad: b.modalidad === 'PROGRAMADO' ? 'PROGRAMADO' : 'AHORA',
   });
   await ejecutar('UPDATE clientes SET ultima_actividad_at = now() WHERE id = ?', clienteId);
   // Lo que usó queda guardado para la próxima compra.
@@ -627,7 +631,12 @@ GET('/cotizar/:total', async (c) => {
     destino = await geocodificar(direccion, { ciudad: `${f?.comuna ?? 'Valparaíso'}, Chile` }).catch(() => null);
   }
   const km = destino ? kmPorCalle(await puntoDeFeria(feriaId), destino) : null;
-  const cotizacion = await cotizar(Number(c.params.total) || 0, { km, rubros });
+  // Programado: el camión de la tarde, a precio fijo. Si hoy ya no
+  // se puede, se cotiza como inmediato y la app lo explica.
+  const feria = await consultarUno<Fila>('SELECT * FROM ferias WHERE id = ?', feriaId);
+  const programado = feria ? programadoDisponible(feria) : null;
+  const quiereProgramado = c.consulta.get('modalidad') === 'programado' && !!programado?.disponible;
+  const cotizacion = { ...cotizar(Number(c.params.total) || 0, { km, rubros, programado: quiereProgramado }), programado };
   // El pedido sale de donde se entrega, no de donde estaba el cliente
   // al abrir la app: si para este punto hay otra feria que reparte y
   // queda bastante más cerca (o la elegida no llega), se le sugiere.
@@ -859,6 +868,25 @@ POST('/operador/items/:id/faltante', async (c) =>
 POST('/operador/pedidos/:id/compensar', async (c) =>
   compensar(c.params.id, c.cuerpo?.monto, c.cuerpo?.motivo, await actor(c, 'operador')));
 
+/** La ruta del camión: lo que espera ruta, las rutas de hoy y los choferes posibles. */
+GET('/operador/rutas', async (c) => {
+  await actor(c, 'operador');
+  const [pendientes, rutas, choferes] = await Promise.all([
+    pendientesDeRuta(),
+    rutasDeHoy(),
+    consultar<Fila>(
+      `SELECT id, nombre, vehiculo, conectado, feria_id FROM repartidores
+        WHERE activo AND NOT pendiente ORDER BY conectado DESC, nombre`),
+  ]);
+  return { pendientes, rutas, choferes, ventana: `${CONFIG.programado.desde}–${CONFIG.programado.hasta}` };
+});
+
+/** Arma la ruta con los programados de hoy de una feria y se la asigna a un chofer. */
+POST('/operador/rutas', async (c) => {
+  await actor(c, 'operador');
+  return armarRuta(c.cuerpo?.feriaId, await repartidorParaAsignar(c.cuerpo?.repartidorId));
+});
+
 /** El operador le entrega a mano un viaje que nadie tomó. */
 POST('/operador/viajes/:id/asignar', async (c) => {
   await actor(c, 'operador');
@@ -890,7 +918,7 @@ POST('/repartidor/conexion', async (c) => {
 
 GET('/repartidor/tablero', async (c) => {
   const id = await actor(c, 'repartidor');
-  const activo = await viajeActivo(id);
+  const [activo, ruta] = await Promise.all([viajeActivo(id), rutaActiva(id)]);
   // El interruptor de la app necesita saber en qué estado está, y
   // antes esto no se devolvía: la pantalla lo adivinaba.
   const yo = await consultarUno<Fila>(
@@ -906,11 +934,16 @@ GET('/repartidor/tablero', async (c) => {
                 pagadoAt: ganancia.pagadoAt, confirmadoAt: ganancia.confirmadoAt },
     pagosPorConfirmar,
     viajeActivo: activo,
+    // La ruta del camión, si es chofer hoy.
+    ruta,
     // Con feria asignada ve solo los viajes de esa feria; sin
     // feria, reparte para todas.
-    disponibles: activo ? [] : await viajesDisponibles(yo?.feria_id ?? undefined),
+    disponibles: activo || ruta ? [] : await viajesDisponibles(yo?.feria_id ?? undefined),
   };
 });
+
+/** El chofer cargó el camión en la feria: retira todas las bolsas de la ruta. */
+POST('/repartidor/ruta/cargar', async (c) => cargarCamion(await actor(c, 'repartidor')));
 
 POST('/viajes/:id/aceptar', async (c) => aceptarViaje(c.params.id, await actor(c, 'repartidor')));
 
@@ -1053,7 +1086,7 @@ GET('/operador/pedidos', async (c) => {
   const estado = c.consulta.get('estado');
   const limite = Math.min(Number(c.consulta.get('limite') ?? 50) || 50, 200);
   const pedidos = await consultar(
-    `SELECT p.id, p.numero, p.estado, p.cliente_nombre, p.cliente_telefono,
+    `SELECT p.id, p.numero, p.estado, p.modalidad, p.cliente_nombre, p.cliente_telefono,
             p.direccion, p.total_productos, p.costo_despacho, p.total_venta, p.creado_at,
             (SELECT COUNT(*)::int FROM sub_pedidos s WHERE s.pedido_id = p.id) AS puestos,
             (SELECT COUNT(*)::int FROM sub_pedidos s

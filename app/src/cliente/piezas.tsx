@@ -280,8 +280,10 @@ export function EnFeria({ nombre, prefijo = 'Comprando en', onPress, claro }: {
  */
 export function caminoDeCotizacion(total: number, o: {
   feriaId: string; rubros: number; punto?: { lat: number; lng: number } | null; direccion?: string;
+  programado?: boolean;
 }): string {
   const q = new URLSearchParams({ feria: o.feriaId, rubros: String(Math.max(1, o.rubros)) });
+  if (o.programado) q.set('modalidad', 'programado');
   if (o.punto) { q.set('lat', String(o.punto.lat)); q.set('lng', String(o.punto.lng)); }
   else if (o.direccion && o.direccion.trim().length >= 6) q.set('direccion', o.direccion.trim());
   return `/cotizar/${total}?${q.toString()}`;

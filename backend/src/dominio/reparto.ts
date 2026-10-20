@@ -8,6 +8,7 @@ import {
 import { publicar } from '../realtime/bus.ts';
 import { evaluarPedido } from './despacho.ts';
 import { kmPorCalle, puntoDeFeria, tarifaReparto } from './tarifas.ts';
+import { revisarRuta } from './rutas.ts';
 
 async function cambiarEstadoViaje(
   viajeId: string, hacia: EstadoViaje, extra: Fila = {},
@@ -53,10 +54,13 @@ export async function crearViaje(pedidoId: string): Promise<string> {
   const km = pedido!.distancia_km != null
     ? Number(pedido!.distancia_km)
     : kmPorCalle(await puntoDeFeria(pedido!.feria_id), { lat: pedido!.lat, lng: pedido!.lng });
-  const tarifa = tarifaReparto(km, retiros.length);
+  // Un programado no se les ofrece a las motos: espera la ruta del
+  // camión, y el chofer gana un monto fijo por entrega.
+  const programado = pedido!.modalidad === 'PROGRAMADO';
+  const tarifa = programado ? CONFIG.programado.pagoPorEntrega : tarifaReparto(km, retiros.length);
   await ejecutar(
-    `INSERT INTO viajes (id, pedido_id, estado, tarifa, tarifa_base) VALUES (?, ?, ?, ?, ?)`,
-    viajeId, pedidoId, EstadoViaje.BUSCANDO, tarifa, tarifa,
+    `INSERT INTO viajes (id, pedido_id, estado, tarifa, tarifa_base, programado) VALUES (?, ?, ?, ?, ?, ?)`,
+    viajeId, pedidoId, EstadoViaje.BUSCANDO, tarifa, tarifa, programado,
   );
 
   let orden = 0;
@@ -74,8 +78,8 @@ export async function crearViaje(pedidoId: string): Promise<string> {
     pedido!.lat, pedido!.lng,
   );
 
-  await registrarEvento('viaje', viajeId, 'creado', { pedidoId, paradas: orden + 1, tarifa });
-  publicar({ tipo: 'viaje:nuevo', viajeId, pedidoId });
+  await registrarEvento('viaje', viajeId, 'creado', { pedidoId, paradas: orden + 1, tarifa, programado });
+  if (!programado) publicar({ tipo: 'viaje:nuevo', viajeId, pedidoId });
   return viajeId;
 }
 
@@ -189,7 +193,7 @@ export async function aceptarViaje(viajeId: string, repartidorId: string): Promi
   return enTransaccion(async () => {
     const r = await ejecutar(
       `UPDATE viajes SET estado = ?, repartidor_id = ?, asignado_at = ?
-        WHERE id = ? AND estado = ?`,
+        WHERE id = ? AND estado = ? AND ruta_id IS NULL`,
       EstadoViaje.ASIGNADO, repartidorId, ahora(), viajeId, EstadoViaje.BUSCANDO,
     );
     if (r.afectadas !== 1) throw new ViajeNoDisponible('Otro repartidor tomó este viaje.');
@@ -325,6 +329,7 @@ export async function completarParada(
         'ENTREGADO', ahora(), viaje!.pedido_id);
       await registrarEvento('pedido', viaje!.pedido_id, '-> ENTREGADO', { repartidorId });
       publicar({ tipo: 'pedido:cambio', pedidoId: viaje!.pedido_id, estado: 'ENTREGADO' });
+      if (viaje!.ruta_id) await revisarRuta(viaje!.ruta_id);
     }
   });
 }
@@ -335,13 +340,18 @@ export async function registrarUbicacion(
   await ejecutar('UPDATE repartidores SET lat = ?, lng = ?, ubicacion_at = ? WHERE id = ?',
     lat, lng, ahora(), repartidorId);
 
-  const viaje = await consultarUno<Fila>(
-    `SELECT id, pedido_id FROM viajes WHERE repartidor_id = ? AND estado IN (?, ?, ?)`,
+  // El chofer del camión lleva varios a la vez: la posición les
+  // sirve a todos los que esperan.
+  const viajes = await consultar<Fila>(
+    `SELECT id, pedido_id FROM viajes WHERE repartidor_id = ? AND estado IN (?, ?, ?)
+      ORDER BY orden_ruta NULLS FIRST`,
     repartidorId, EstadoViaje.ASIGNADO, EstadoViaje.RETIRANDO, EstadoViaje.EN_RUTA);
-  if (!viaje) return;
+  if (viajes.length === 0) return;
 
   await ejecutar(
     'INSERT INTO ubicaciones (repartidor_id, viaje_id, lat, lng) VALUES (?, ?, ?, ?)',
-    repartidorId, viaje.id, lat, lng);
-  publicar({ tipo: 'ubicacion', viajeId: viaje.id, pedidoId: viaje.pedido_id, lat, lng });
+    repartidorId, viajes[0].id, lat, lng);
+  for (const v of viajes) {
+    publicar({ tipo: 'ubicacion', viajeId: v.id, pedidoId: v.pedido_id, lat, lng });
+  }
 }

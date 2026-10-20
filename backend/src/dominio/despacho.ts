@@ -12,6 +12,7 @@ import { crearViaje, sincronizarParadas } from './reparto.ts';
 import { verificarHorario, horarioDeFeria } from './horario.ts';
 import { geocodificar } from './geocodificar.ts';
 import { despachoParaCliente, fueraDeZona, kmPorCalle, puntoDeFeria } from './tarifas.ts';
+import { despachoProgramado, programadoDisponible, ventanaProgramada } from './rutas.ts';
 
 // ============================================================
 // Cambios de estado
@@ -94,6 +95,8 @@ export type PedidoEntrante = {
   precisionM?: number;
   notas?: string | null;
   items: ItemEntrante[];
+  /** «PROGRAMADO»: llega en el camión de la tarde, más barato. */
+  modalidad?: 'AHORA' | 'PROGRAMADO';
 };
 
 export class PedidoMuyChico extends Error {
@@ -121,13 +124,19 @@ export function calcularDespacho(totalProductos: number, km = 0, rubros = 1): nu
  * el de verdad. Sin dirección todavía, es el de un viaje corto y
  * va marcado como estimado: la app dice «desde».
  */
-export function cotizar(totalProductos: number, opciones: { km?: number | null; rubros?: number } = {}) {
+export function cotizar(
+  totalProductos: number,
+  opciones: { km?: number | null; rubros?: number; programado?: boolean } = {},
+) {
   const km = opciones.km ?? null;
   const rubros = Math.max(1, opciones.rubros ?? 1);
-  const d = despachoParaCliente(totalProductos, km ?? 0, rubros);
+  const d = opciones.programado
+    ? { despacho: despachoProgramado(totalProductos, km ?? 0) }
+    : despachoParaCliente(totalProductos, km ?? 0, rubros);
   const lejos = km !== null && fueraDeZona(km);
   return {
     totalProductos,
+    modalidad: opciones.programado ? 'PROGRAMADO' : 'AHORA',
     despacho: d.despacho,
     total: totalProductos + d.despacho,
     distanciaKm: km,
@@ -230,6 +239,11 @@ export async function crearPedido(entrada: PedidoEntrante): Promise<{ pedidoId: 
   // Un pedido fuera de horario no tiene a quién ofrecerse: no hay
   // ni un puesto abierto en toda la feria.
   verificarHorario(new Date(), horarioDeFeria(feria));
+  const programado = entrada.modalidad === 'PROGRAMADO';
+  if (programado) {
+    const p = programadoDisponible(feria);
+    if (!p.disponible) throw new ErrorNegocio(422, p.motivo ?? 'Hoy no hay reparto programado.');
+  }
 
   // El punto lo decide el servidor a partir de la dirección escrita,
   // no la app: antes llegaba siempre el mismo par de coordenadas y
@@ -285,7 +299,9 @@ export async function crearPedido(entrada: PedidoEntrante): Promise<{ pedidoId: 
       throw new ErrorNegocio(422,
         `Esa dirección queda a ${km.toFixed(1)} km de la feria: repartimos hasta ${CONFIG.reparto.maxKm} km.`);
     }
-    const costoDespacho = calcularDespacho(totalProductos, km, porRubro.size);
+    const costoDespacho = programado
+      ? despachoProgramado(totalProductos, km)
+      : calcularDespacho(totalProductos, km, porRubro.size);
     const totalVenta = totalProductos + costoDespacho;
 
     const pedidoId = id();
@@ -303,10 +319,13 @@ export async function crearPedido(entrada: PedidoEntrante): Promise<{ pedidoId: 
     );
     const numero = creado!.numero;
     // El código que el cliente le dicta al repartidor al recibir.
-    await ejecutar('UPDATE pedidos SET codigo_entrega = ?, distancia_km = ? WHERE id = ?',
-      String(randomInt(1000, 10000)), km, pedidoId);
+    await ejecutar(
+      'UPDATE pedidos SET codigo_entrega = ?, distancia_km = ?, modalidad = ?, ventana = ? WHERE id = ?',
+      String(randomInt(1000, 10000)), km, programado ? 'PROGRAMADO' : 'AHORA',
+      programado ? ventanaProgramada() : null, pedidoId);
     await registrarEvento('pedido', pedidoId, 'creado',
-      { numero, totalProductos, costoDespacho, totalVenta, rubros: [...porRubro.keys()] });
+      { numero, totalProductos, costoDespacho, totalVenta, rubros: [...porRubro.keys()],
+        modalidad: programado ? 'PROGRAMADO' : 'AHORA' });
 
     const subIds: string[] = [];
     for (const [rubroId, itemsRubro] of porRubro) {

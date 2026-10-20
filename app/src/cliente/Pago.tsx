@@ -34,6 +34,8 @@ export default function Pago({
   const [catalogo, setCatalogo] = useState<any[] | null>(null);
   const [cotizacion, setCotizacion] = useState<any>(null);
   const [pagando, setPagando] = useState(false);
+  /** Programado: llega en el camión de la tarde, más barato. */
+  const [programado, setProgramado] = useState(false);
   const [editandoQuien, setEditandoQuien] = useState(false);
   const inset = useSafeAreaInsets();
 
@@ -52,13 +54,13 @@ export default function Pago({
   const rubros = new Set(Object.keys(carro).map((id) => productos.find((x: any) => x.id === id)?.rubro_id).filter(Boolean)).size;
   const puntoVigenteAhora = borrador.punto && borrador.punto.direccion.trim() === borrador.direccion.trim()
     ? { lat: borrador.punto.lat, lng: borrador.punto.lng } : null;
-  const claveCotizacion = `${totalProductos}|${rubros}|${feriaId}|${puntoVigenteAhora ? `${puntoVigenteAhora.lat},${puntoVigenteAhora.lng}` : borrador.direccion.trim()}`;
+  const claveCotizacion = `${programado}|${totalProductos}|${rubros}|${feriaId}|${puntoVigenteAhora ? `${puntoVigenteAhora.lat},${puntoVigenteAhora.lng}` : borrador.direccion.trim()}`;
   useEffect(() => {
     if (totalProductos === 0) return setCotizacion(null);
     let vigente = true;
     const t = setTimeout(() => {
       api('GET', caminoDeCotizacion(totalProductos, {
-        feriaId, rubros, punto: puntoVigenteAhora, direccion: borrador.direccion,
+        feriaId, rubros, punto: puntoVigenteAhora, direccion: borrador.direccion, programado,
       }))
         .then((c) => { if (vigente) setCotizacion(c); })
         .catch(() => {});
@@ -66,6 +68,10 @@ export default function Pago({
     return () => { vigente = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claveCotizacion]);
+
+  const infoProgramado = cotizacion?.programado ?? null;
+  // Si se cerró el programado mientras tenía la pantalla abierta, vuelve a «ahora».
+  const programadoVale = programado && !!infoProgramado?.disponible;
 
   if (!catalogo) return <Cargando />;
 
@@ -103,6 +109,7 @@ export default function Pago({
             puntoMarcado: true, lat: punto.lat, lng: punto.lng, precisionM: punto.precisionM,
           } : { lat: borrador.lat, lng: borrador.lng }),
           feriaId,
+          modalidad: programadoVale ? 'PROGRAMADO' : 'AHORA',
           items: Object.entries(carro).map(([productoId, cantidad]) => ({ productoId, cantidad })),
         },
       });
@@ -238,8 +245,31 @@ export default function Pago({
           ) : null}
         </View>
 
+        {/* Ahora (moto, en una hora) o programado (el camión de la
+            tarde, más barato). Si hoy ya no hay programado se dice por qué. */}
         <View style={e.bloque}>
-          <Paso n={4} titulo="Cómo pagas" listo />
+          <Paso n={4} titulo="¿Cuándo lo quieres?" listo />
+          <View style={{ gap: E.s }}>
+            <Opcion
+              elegida={!programadoVale}
+              titulo="Lo antes posible"
+              detalle="En moto, apenas esté listo en la feria."
+              onPress={() => setProgramado(false)}
+            />
+            <Opcion
+              elegida={programadoVale}
+              deshabilitada={!infoProgramado?.disponible}
+              titulo={`Programado · hoy entre ${infoProgramado?.ventana ?? '16:00–19:00'}`}
+              detalle={infoProgramado?.disponible
+                ? `Va en el camión de la tarde con los demás pedidos. Despacho ${clp(infoProgramado.costo)}${cotizacion?.gratisDesde ? `, gratis desde ${clp(cotizacion.gratisDesde)} cerca de la feria` : ''}. Pide hasta las ${infoProgramado.corte}.`
+                : infoProgramado?.motivo ?? 'Cargando…'}
+              onPress={() => setProgramado(true)}
+            />
+          </View>
+        </View>
+
+        <View style={e.bloque}>
+          <Paso n={5} titulo="Cómo pagas" listo />
           <View style={e.medio}>
             <Icono nombre="tarjeta" tamano={24} color={C.verdeOscuro} />
             <View style={{ flex: 1 }}>
@@ -288,7 +318,13 @@ export default function Pago({
             />
             <View style={e.separador} />
             <Linea etiqueta="Total" valor={clp(cotizacion.total)} grande />
-            {cotizacion.distanciaKm != null && !cotizacion.fueraDeZona ? (
+            {cotizacion.modalidad === 'PROGRAMADO' && !cotizacion.fueraDeZona ? (
+              <Text style={T.micro}>
+                {cotizacion.despacho === 0
+                  ? 'Despacho gratis por tu compra · llega en el camión de la tarde.'
+                  : 'Despacho programado: precio fijo, porque el camión reparte todos los pedidos juntos.'}
+              </Text>
+            ) : cotizacion.distanciaKm != null && !cotizacion.fueraDeZona ? (
               <Text style={T.micro}>
                 Despacho calculado a {String(cotizacion.distanciaKm).replace('.', ',')} km de la feria
                 {cotizacion.despacho === 0 ? ' · gratis por tu compra' : ' · es lo que gana tu repartidor'}.
@@ -436,4 +472,44 @@ const e = StyleSheet.create({
     backgroundColor: C.fondo,
     borderTopWidth: 1, borderTopColor: C.borde,
   },
+});
+
+/** Una opción de entrega: un botón grande con su explicación. */
+function Opcion({ elegida, deshabilitada, titulo, detalle, onPress }: {
+  elegida: boolean; deshabilitada?: boolean; titulo: string; detalle: string; onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={deshabilitada}
+      accessibilityRole="radio"
+      accessibilityState={{ selected: elegida, disabled: deshabilitada }}
+      style={({ pressed }) => [
+        eo.opcion,
+        elegida && { borderColor: C.verde, backgroundColor: C.verdeSuave },
+        deshabilitada && { opacity: 0.55 },
+        pressed && { opacity: 0.8 },
+      ]}
+    >
+      <View style={[eo.radio, elegida && { borderColor: C.verde }]}>
+        {elegida ? <View style={eo.radioPunto} /> : null}
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={T.destacado}>{titulo}</Text>
+        <Text style={T.micro}>{detalle}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+const eo = StyleSheet.create({
+  opcion: {
+    flexDirection: 'row', alignItems: 'center', gap: E.m,
+    borderWidth: 1, borderColor: C.borde, borderRadius: R.medio, padding: E.m,
+  },
+  radio: {
+    width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: C.borde,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  radioPunto: { width: 10, height: 10, borderRadius: 5, backgroundColor: C.verde },
 });

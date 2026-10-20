@@ -1,6 +1,7 @@
 import { consultarUno, consultar, ejecutar, type Fila } from '../db/index.ts';
 import { bus, type Mensaje } from './bus.ts';
 import { CONFIG } from '../config.ts';
+import { llegadasDeRuta } from '../dominio/rutas.ts';
 
 /**
  * Notificaciones push por la API de Expo.
@@ -396,16 +397,66 @@ export async function enviarRecordatorios(): Promise<number> {
   return nuevos.length;
 }
 
+// ============================================================
+// El camión de la tarde
+// ============================================================
+
+/** Al chofer: le asignaron la ruta. */
+async function avisoDeRuta(m: Extract<Mensaje, { tipo: 'ruta:nueva' }>): Promise<MensajePush[]> {
+  const r = await consultarUno<Fila>('SELECT push_token FROM repartidores WHERE id = ?', m.repartidorId);
+  if (!r?.push_token) return [];
+  return [{
+    to: r.push_token,
+    title: `Tienes la ruta del camión: ${m.entregas} entregas`,
+    body: 'Pasa a cargar las bolsas en la feria. Las entregas ya están en orden.',
+    sound: 'default', priority: 'high', channelId: 'viajes',
+    data: { tipo: 'ruta', rutaId: m.rutaId },
+  }];
+}
+
+/**
+ * A los clientes de la ruta cuyo pedido viene pronto: cuando faltan
+ * dos entregas o menos antes de la suya. Una sola vez por pedido.
+ */
+export async function avisosDeAvanceDeRuta(rutaId: string): Promise<MensajePush[]> {
+  const avisos: MensajePush[] = [];
+  for (const l of await llegadasDeRuta(rutaId)) {
+    if (l.antes > 2) break;
+    const r = await ejecutar(
+      'INSERT INTO alertas (clave, texto) VALUES (?, ?) ON CONFLICT (clave) DO NOTHING',
+      `ruta:cerca:${l.pedidoId}`, 'aviso de llegada del camión');
+    if (r.afectadas !== 1) continue;
+    const p = await consultarUno<Fila>(
+      `SELECT p.numero, c.push_token FROM pedidos p JOIN clientes c ON c.id = p.cliente_id
+        WHERE p.id = ?`, l.pedidoId);
+    if (!p?.push_token) continue;
+    avisos.push({
+      to: p.push_token,
+      title: l.antes === 0 ? `Tu pedido #${p.numero} es la próxima entrega` : `Tu pedido #${p.numero} llega pronto`,
+      body: `${l.antes === 0 ? 'El camión va directo a tu casa' : `Faltan ${l.antes} ${l.antes === 1 ? 'entrega' : 'entregas'} antes de la tuya`}: unos ${l.minutos} minutos. Ten a mano tu código de entrega.`,
+      sound: 'default', priority: 'high', channelId: 'pedidos',
+      data: { tipo: 'pedido', pedidoId: l.pedidoId },
+    });
+  }
+  return avisos;
+}
+
 export async function avisoAlCliente(pedidoId: string, estado: string): Promise<MensajePush | null> {
   const texto = PARA_EL_CLIENTE[estado];
   if (!texto) return null;
   const p = await consultarUno<Fila>(
-    `SELECT p.numero, c.push_token FROM pedidos p JOIN clientes c ON c.id = p.cliente_id
+    `SELECT p.numero, p.modalidad, p.ventana, c.push_token FROM pedidos p
+       JOIN clientes c ON c.id = p.cliente_id
       WHERE p.id = ?`, pedidoId);
   if (!p?.push_token) return null;
+  // El programado no sale «ya»: sale en el camión, con su ventana.
+  const programado = p.modalidad === 'PROGRAMADO' && estado === 'EN_RUTA'
+    ? { title: `Tu pedido #${p.numero} va en el camión`,
+        body: `Llega entre ${p.ventana ?? 'la tarde'}. Te avisamos cuando falten dos entregas antes de la tuya.` }
+    : null;
   return {
     to: p.push_token,
-    ...texto(p.numero),
+    ...(programado ?? texto(p.numero)),
     sound: 'default',
     priority: 'high',
     channelId: 'pedidos',
@@ -429,6 +480,10 @@ export function iniciarNotificaciones(): void {
           await enviarPush(await avisosDeAutogestion(m));
         } else if (m.tipo === 'pedido:cancelado') {
           await enviarPush(await avisosDeCancelacion(m));
+        } else if (m.tipo === 'ruta:nueva') {
+          await enviarPush(await avisoDeRuta(m));
+        } else if (m.tipo === 'ruta:avance') {
+          await enviarPush(await avisosDeAvanceDeRuta(m.rutaId));
         } else if (m.tipo === 'viaje:cambio') {
           await enviarPush(await avisosDeRetiro(m));
         } else if (m.tipo === 'pedido:cambio') {

@@ -100,7 +100,9 @@ export default function Seguimiento({
         ) : (
           <View style={e.portada}>
             <Text style={[T.micro, { color: 'rgba(255,255,255,0.8)' }]}>
-              {entregado ? 'Entregado' : 'Llega hoy'}
+              {entregado ? 'Entregado'
+                : datos.modalidad === 'PROGRAMADO' ? `Programado · llega hoy entre ${datos.ventana ?? 'la tarde'}`
+                : 'Llega hoy'}
             </Text>
             <Text style={[T.titulo, { color: '#FFFFFF', marginTop: 2 }]}>
               {TITULOS[datos.estado] ?? 'Tu pedido va en camino'}
@@ -109,6 +111,13 @@ export default function Seguimiento({
             {datos.viaje?.eta_minutos && !entregado ? (
               <Text style={[T.destacado, { color: '#FFFFFF', marginTop: E.xs }]}>
                 Llega en unos {datos.viaje.eta_minutos} minutos
+              </Text>
+            ) : null}
+            {datos.viaje?.entregas_antes != null && !entregado ? (
+              <Text style={[T.apoyo, { color: 'rgba(255,255,255,0.9)' }]}>
+                {datos.viaje.entregas_antes === 0
+                  ? 'Eres la próxima entrega del camión.'
+                  : `El camión tiene ${datos.viaje.entregas_antes} ${datos.viaje.entregas_antes === 1 ? 'entrega' : 'entregas'} antes de la tuya.`}
               </Text>
             ) : null}
             <Text style={[T.apoyo, { color: 'rgba(255,255,255,0.85)', marginTop: E.xs }]}>

@@ -3,6 +3,7 @@ import { EstadoSubPedido, EstadoViaje } from './estados.ts';
 import { CONFIG } from '../config.ts';
 import { hoy } from './liquidaciones.ts';
 import { estimarLlegada } from './mejoras.ts';
+import { llegadasDeRuta } from './rutas.ts';
 
 const diaDe = (col: string) => `(${col} AT TIME ZONE '${CONFIG.zonaHoraria}')::date`;
 
@@ -55,7 +56,7 @@ export async function viajesDisponibles(feriaId?: string) {
               WHERE viaje_id = v.id AND tipo = 'RETIRO') AS retiros
        FROM viajes v
        JOIN pedidos p ON p.id = v.pedido_id
-      WHERE v.estado = ? ${feriaId ? 'AND p.feria_id = ?' : ''}
+      WHERE v.estado = ? AND NOT v.programado ${feriaId ? 'AND p.feria_id = ?' : ''}
       ORDER BY v.creado_at`,
     ...(feriaId ? [EstadoViaje.BUSCANDO, feriaId] : [EstadoViaje.BUSCANDO]));
 
@@ -70,7 +71,7 @@ export async function viajeActivo(repartidorId: string) {
     `SELECT v.*, p.numero, p.cliente_nombre, p.cliente_telefono, p.direccion, p.notas,
             p.geo_precision, p.distancia_km
        FROM viajes v JOIN pedidos p ON p.id = v.pedido_id
-      WHERE v.repartidor_id = ? AND v.estado IN (?, ?, ?)`,
+      WHERE v.repartidor_id = ? AND v.ruta_id IS NULL AND v.estado IN (?, ?, ?)`,
     repartidorId, EstadoViaje.ASIGNADO, EstadoViaje.RETIRANDO, EstadoViaje.EN_RUTA);
   if (!viaje) return null;
 
@@ -134,8 +135,17 @@ export async function pedidoCompleto(pedidoId: string) {
 
   const calificacion = await consultarUno<Fila>(
     'SELECT estrellas, comentario FROM calificaciones WHERE pedido_id = ?', pedidoId);
+  // En el camión la llegada depende de las entregas que van antes.
+  const enRuta = viaje?.ruta_id
+    ? (await llegadasDeRuta(viaje.ruta_id)).find((l) => l.pedidoId === pedidoId) ?? null
+    : null;
   const conEta = viaje
-    ? { ...viaje, eta_minutos: estimarLlegada(pedido, viaje, viaje.retiros_pendientes ?? 0) }
+    ? {
+        ...viaje,
+        eta_minutos: viaje.ruta_id ? enRuta?.minutos ?? null
+          : estimarLlegada(pedido, viaje, viaje.retiros_pendientes ?? 0),
+        entregas_antes: enRuta?.antes ?? null,
+      }
     : null;
   return { ...pedido, subPedidos: await conItems(subs), viaje: conEta, calificacion: calificacion ?? null };
 }

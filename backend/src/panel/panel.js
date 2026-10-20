@@ -230,6 +230,7 @@ const SECCIONES = [
   ['hoy', 'Hoy'],
   ['pedidos', 'Pedidos'],
   ['catalogo', 'Catálogo'],
+  ['rutas', 'Ruta del camión'],
   ['liquidaciones', 'A pagar'],
   ['reembolsos', 'Reembolsos'],
   ['gente', 'Gente'],
@@ -247,6 +248,7 @@ async function cargar() {
         `/operador/pedidos?limite=100${datos.filtro ? `&estado=${datos.filtro}` : ''}`)).pedidos;
     }
     if (seccion === 'catalogo') datos.catalogo = await api('GET', '/operador/catalogo');
+    if (seccion === 'rutas') datos.rutas = await api('GET', '/operador/rutas');
     if (seccion === 'reembolsos') {
       datos.reembolsos = (await api('GET', '/operador/reembolsos-pendientes')).pendientes;
     }
@@ -361,7 +363,7 @@ function vistaPedidos() {
         <tbody>
           ${lista.map((p) => `
             <tr class="clicable" data-pedido="${esc(p.id)}">
-              <td><strong>${p.numero}</strong></td>
+              <td><strong>${p.numero}</strong>${p.modalidad === 'PROGRAMADO' ? ' <span class="chip">camión</span>' : ''}</td>
               <td>${chip(p.estado)}${p.autogestionados > 0
                 ? ' <span class="chip marca">autogestión</span>' : ''}</td>
               <td>${esc(p.cliente_nombre)}<br><span class="suave">${esc(p.cliente_telefono)}</span></td>
@@ -688,6 +690,72 @@ function vistaPagoRepartidores() {
     </div>`;
 }
 
+// ---------- Ruta del camión ----------
+
+const ESTADO_PEDIDO = {
+  DESPACHANDO: 'buscando puesto', EN_PREPARACION: 'en preparación', LISTO_PARA_RETIRO: 'listo',
+};
+const ESTADO_RUTA = { ARMADA: 'por cargar', EN_CURSO: 'en camino', TERMINADA: 'terminada' };
+
+/**
+ * Los pedidos programados de hoy y las rutas del camión. Al cierre
+ * de la feria se juntan los de cada feria en una ruta, se elige el
+ * chofer y la app le muestra las entregas en el orden más corto.
+ */
+function vistaRutas() {
+  const d = datos.rutas;
+  if (!d) return '<div class="vacio">Cargando…</div>';
+  const porFeria = new Map();
+  for (const p of d.pendientes) {
+    porFeria.set(p.feria_id, [...(porFeria.get(p.feria_id) ?? []), p]);
+  }
+  const opciones = d.choferes.map((c) =>
+    `<option value="${esc(c.id)}">${esc(c.nombre)} · ${esc(c.vehiculo)}${c.conectado ? ' · conectado' : ''}</option>`).join('');
+  return `
+    <h1>Ruta del camión</h1>
+    <p class="suave" style="margin:-4px 0 20px">Los pedidos programados de hoy se reparten juntos entre las
+      ${esc(d.ventana)}. Al cierre, arma la ruta de cada feria y asígnale un chofer: la app le muestra
+      las entregas en el orden más corto y avisa a cada cliente cuando faltan dos entregas antes de la suya.</p>
+
+    ${porFeria.size === 0 ? '<div class="tarjeta"><div class="vacio">No hay pedidos programados esperando ruta.</div></div>' : ''}
+    ${[...porFeria].map(([feriaId, lista]) => {
+      const listos = lista.filter((p) => p.estado_pedido === 'LISTO_PARA_RETIRO').length;
+      return `
+      <div class="tarjeta" style="padding:0;overflow:hidden;margin-bottom:16px">
+        <div class="fila" style="justify-content:space-between;padding:16px 18px;gap:12px;flex-wrap:wrap">
+          <div><h2 style="margin:0">${esc(lista[0].feria_nombre ?? feriaId)}</h2>
+            <span class="suave">${lista.length} ${lista.length === 1 ? 'pedido' : 'pedidos'} · ${listos} listos en los puestos</span></div>
+          <div class="fila" style="gap:8px">
+            <select data-chofer="${esc(feriaId)}">${opciones}</select>
+            <button class="accion" data-armar-ruta="${esc(feriaId)}" ${d.choferes.length ? '' : 'disabled'}>Armar ruta</button>
+          </div>
+        </div>
+        <div class="tabla"><table>
+          <thead><tr><th>Pedido</th><th>Cliente</th><th>Dirección</th><th class="num">Km</th><th>Estado</th></tr></thead>
+          <tbody>${lista.map((p) => `
+            <tr><td>#${p.numero}</td><td>${esc(p.cliente_nombre)}</td><td>${esc(p.direccion)}</td>
+              <td class="num">${p.distancia_km != null ? String(p.distancia_km).replace('.', ',') : '—'}</td>
+              <td><span class="chip ${p.estado_pedido === 'LISTO_PARA_RETIRO' ? 'exito' : ''}">${esc(ESTADO_PEDIDO[p.estado_pedido] ?? p.estado_pedido)}</span></td></tr>`).join('')}
+          </tbody>
+        </table></div>
+      </div>`;
+    }).join('')}
+
+    <h2 style="margin:28px 0 12px">Rutas de hoy</h2>
+    <div class="tarjeta" style="padding:0;overflow:hidden">
+      ${d.rutas.length === 0 ? '<div class="vacio">Todavía no se arma ninguna ruta hoy.</div>' : `
+      <div class="tabla"><table>
+        <thead><tr><th>Feria</th><th>Chofer</th><th class="num">Entregas</th><th class="num">Km</th><th>Estado</th></tr></thead>
+        <tbody>${d.rutas.map((r) => `
+          <tr><td>${esc(r.feria_nombre)}</td><td>${esc(r.chofer)}</td>
+            <td class="num">${r.entregados} de ${r.entregas}</td>
+            <td class="num">${r.km_total != null ? String(r.km_total).replace('.', ',') : '—'}</td>
+            <td><span class="chip ${r.estado === 'TERMINADA' ? 'exito' : r.estado === 'EN_CURSO' ? 'aviso' : ''}">${esc(ESTADO_RUTA[r.estado] ?? r.estado)}</span></td></tr>`).join('')}
+        </tbody>
+      </table></div>`}
+    </div>`;
+}
+
 // ---------- Reembolsos ----------
 
 function vistaReembolsos() {
@@ -989,6 +1057,7 @@ function pintar() {
       : seccion === 'hoy' ? vistaHoy()
       : seccion === 'pedidos' ? vistaPedidos()
       : seccion === 'catalogo' ? vistaCatalogo()
+      : seccion === 'rutas' ? vistaRutas()
       : seccion === 'liquidaciones' ? vistaLiquidaciones()
       : seccion === 'reembolsos' ? vistaReembolsos()
       : seccion === 'ferias' ? vistaFerias()
@@ -1253,6 +1322,16 @@ function conectar() {
     const { devuelto: id, monto } = e.currentTarget.dataset;
     if (!confirm(`¿Ya le devolviste ${clp(Number(monto))} por tu cuenta? Sale de esta lista.`)) return;
     return accion(() => api('POST', `/operador/reembolsos/${id}/hecho`), 'Anotado.');
+  });
+
+  // ---- Ruta del camión ----
+  en('[data-armar-ruta]', 'click', (e) => {
+    const feriaId = e.currentTarget.dataset.armarRuta;
+    const sel = document.querySelector(`[data-chofer="${CSS.escape(feriaId)}"]`);
+    const chofer = sel?.selectedOptions[0]?.textContent ?? '';
+    if (!sel?.value || !confirm(`¿Armar la ruta y asignársela a ${chofer.split(' · ')[0]}?`)) return;
+    return accion(() => api('POST', '/operador/rutas', { feriaId, repartidorId: sel.value }),
+                  'Ruta armada. Le avisamos al chofer.');
   });
 
   // ---- Liquidaciones ----

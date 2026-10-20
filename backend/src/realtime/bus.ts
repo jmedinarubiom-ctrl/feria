@@ -19,7 +19,11 @@ export type Mensaje =
   | { tipo: 'viaje:cambio'; viajeId: string; estado: string; repartidorId?: string }
   | { tipo: 'autogestion:nueva'; subPedidoId: string; pedidoId: string }
   | { tipo: 'ubicacion'; viajeId: string; pedidoId: string; lat: number; lng: number }
-  | { tipo: 'pedido:cancelado'; pedidoId: string; numero: number; ferianteIds: string[] };
+  | { tipo: 'pedido:cancelado'; pedidoId: string; numero: number; ferianteIds: string[] }
+  /** El operador le asignó una ruta del camión a un chofer. */
+  | { tipo: 'ruta:nueva'; rutaId: string; repartidorId: string; entregas: number }
+  /** El camión cargó o entregó: hay que avisar a los que vienen. */
+  | { tipo: 'ruta:avance'; rutaId: string };
 
 export const bus = new EventEmitter<{ mensaje: [Mensaje] }>();
 

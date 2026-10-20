@@ -173,7 +173,7 @@ export async function escalarViajes(): Promise<number> {
     `SELECT v.id, v.pedido_id, p.numero,
             (extract(epoch FROM now() - v.creado_at) / 60)::int AS minutos
        FROM viajes v JOIN pedidos p ON p.id = v.pedido_id
-      WHERE v.estado = ? AND v.repartidor_id IS NULL
+      WHERE v.estado = ? AND v.repartidor_id IS NULL AND NOT v.programado
         AND v.creado_at > now() - interval '3 hours'`, EstadoViaje.BUSCANDO);
   let avisados = 0;
   for (const v of viajes) {

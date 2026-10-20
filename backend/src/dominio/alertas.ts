@@ -1,5 +1,8 @@
 import { consultar, consultarUno, ejecutar, type Fila } from '../db/index.ts';
 import { enviarCorreo, plantillaCorreo } from '../correo.ts';
+import { CONFIG } from '../config.ts';
+import { momentoLocal } from './horario.ts';
+import { pendientesDeRuta } from './rutas.ts';
 
 /**
  * Avisos al operador cuando algo necesita que mire.
@@ -51,6 +54,19 @@ async function buscarProblemas(silencio: number | null): Promise<Problema[]> {
     });
   }
 
+  // Una hora antes de la ventana del camión, los programados ya
+  // tienen que estar en una ruta.
+  const [h, m] = CONFIG.programado.desde.split(':').map(Number);
+  if (momentoLocal().minutos >= h * 60 + m - 60) {
+    const sinRuta = await pendientesDeRuta();
+    if (sinRuta.length) {
+      p.push({
+        clave: `programados:${new Date().toISOString().slice(0, 10)}`,
+        texto: `Hay ${sinRuta.length} pedidos programados sin ruta. Ármala en el panel (Ruta del camión) y asígnale un chofer.`,
+      });
+    }
+  }
+
   const auto = await consultar<Fila>(
     `SELECT s.id, s.rubro_id, p.numero FROM sub_pedidos s JOIN pedidos p ON p.id = s.pedido_id
       WHERE s.estado = 'AUTOGESTION' AND p.creado_at > now() - interval '2 days'`);
@@ -63,7 +79,7 @@ async function buscarProblemas(silencio: number | null): Promise<Problema[]> {
 
   const viajes = await consultar<Fila>(
     `SELECT v.id, p.numero FROM viajes v JOIN pedidos p ON p.id = v.pedido_id
-      WHERE v.estado = 'BUSCANDO' AND v.repartidor_id IS NULL
+      WHERE v.estado = 'BUSCANDO' AND v.repartidor_id IS NULL AND NOT v.programado
         AND v.creado_at < now() - make_interval(mins => ?)
         AND v.creado_at > now() - interval '2 days'`, MINUTOS_SIN_REPARTIDOR);
   for (const v of viajes) {

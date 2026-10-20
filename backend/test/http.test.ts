@@ -444,3 +444,14 @@ test('la feria se sugiere por el punto de entrega, no por donde está el cliente
 
   assert.equal((await pedir('GET', '/ferias/cercana?lat=hola&lng=1')).estado, 422);
 });
+
+test('la cotización programada cobra el precio fijo del camión y dice hasta qué hora se puede', async () => {
+  const r = await pedir('GET', '/cotizar/12000?feria=feria-av-argentina&modalidad=programado&lat=-33.0430&lng=-71.6270');
+  assert.equal(r.estado, 200);
+  assert.equal(r.json.modalidad, 'PROGRAMADO');
+  assert.equal(r.json.despacho, CONFIG.programado.costo);
+  assert.equal(r.json.programado.disponible, true);
+  assert.equal(r.json.programado.ventana, `${CONFIG.programado.desde}–${CONFIG.programado.hasta}`);
+  const ahora = await pedir('GET', '/cotizar/12000?feria=feria-av-argentina&lat=-33.0430&lng=-71.6270');
+  assert.equal(ahora.json.modalidad, 'AHORA');
+});

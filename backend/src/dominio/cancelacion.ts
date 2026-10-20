@@ -4,6 +4,7 @@ import {
 import { EstadoPedido, EstadoSubPedido, EstadoViaje } from './estados.ts';
 import { publicar } from '../realtime/bus.ts';
 import { pasarela } from './pagos.ts';
+import { revisarRuta } from './rutas.ts';
 
 export class ErrorCancelacion extends Error {
   codigo: number;
@@ -129,6 +130,8 @@ export async function cancelarPedido(datos: Cancelacion): Promise<ResultadoCance
         EstadoViaje.CANCELADO, viaje.id);
       await registrarEvento('viaje', viaje.id, '-> CANCELADO', { motivo });
       publicar({ tipo: 'viaje:cambio', viajeId: viaje.id, estado: EstadoViaje.CANCELADO });
+      // Si iba en el camión y era lo último que quedaba, la ruta termina.
+      if (viaje.ruta_id) await revisarRuta(viaje.ruta_id);
     }
 
     await ejecutar('UPDATE pedidos SET estado = ? WHERE id = ?',

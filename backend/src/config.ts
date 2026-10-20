@@ -118,6 +118,30 @@ export const CONFIG = {
     pedidoMinimo: 8_000,
   },
 
+  /**
+   * Compra programada: se pide en la mañana y un camión reparte todos
+   * los pedidos juntos al cierre de la feria. Más barato porque el
+   * costo de la ruta se reparte entre todos.
+   *
+   * Cuenta gruesa (octubre 2026): chofer media jornada ~$30.000,
+   * petróleo de ~40 km ~$6.000, camión ~$20.000 → ~$56.000 por ruta.
+   * Con 30 pedidos son ~$1.900 cada uno; bajo ~25 la ruta pierde.
+   */
+  programado: {
+    /** Lo que paga el cliente de despacho (gratis desde `despacho.gratisDesde`, igual que siempre). */
+    costo: Number(process.env.PROGRAMADO_COSTO ?? 1900),
+    /** Lo que gana el chofer por cada entrega de la ruta. */
+    pagoPorEntrega: Number(process.env.PROGRAMADO_PAGO_ENTREGA ?? 1900),
+    /** Hasta qué hora del día de feria se aceptan programados. */
+    corte: process.env.PROGRAMADO_CORTE ?? '12:00',
+    /** La ventana que se le promete al cliente. */
+    desde: process.env.PROGRAMADO_DESDE ?? '16:00',
+    hasta: process.env.PROGRAMADO_HASTA ?? '19:00',
+    /** Para estimar la hora de llegada en la ruta: camión en ciudad. */
+    kmPorHora: 20,
+    minutosPorEntrega: 4,
+  },
+
   /** Cada cuánto el motor revisa ofertas vencidas, en ms. */
   intervaloTickMs: 1000,
 

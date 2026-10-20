@@ -59,6 +59,8 @@ export function horarioDeFeria(f: {
   return { dias: f.dias, abre: f.abre, ultimoPedido: f.ultimo_pedido, cierra: f.cierra };
 }
 export const horarioActual = (): Horario => horario;
+/** Si el horario está forzado (tests o desarrollo): entonces no hay hora de corte. */
+export const horarioForzado = (): boolean => forzado;
 
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 const CODIGOS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

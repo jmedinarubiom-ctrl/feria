@@ -459,6 +459,23 @@ devuelve `sugerida` si para esa dirección hay otra feria que reparte
 y queda ≥1,5 km más cerca (o la elegida no llega), y Pago ofrece el
 cambio conservando el carro.
 
+**Compra programada / camión de la tarde** (migración 021,
+`dominio/rutas.ts`): el cliente elige al pagar «Lo antes posible» o
+«Programado · hoy entre 16:00–19:00» (`CONFIG.programado`: $1.900
+fijo, gratis igual desde $25.000 dentro de 4 km; corte 12:00). El
+pedido se despacha a los feriantes igual que siempre, pero su viaje
+nace `programado` y NO se ofrece a las motos (filtrado en
+`viajesDisponibles`, `escalarViajes`, alertas y `aceptarViaje`). El
+operador, en el panel «Ruta del camión», arma la ruta de cada feria
+y elige chofer (`armarRuta`: vecino más cercano + 2-opt, sin volver
+a la feria). El chofer usa la app de repartidor (`RutaCamion.tsx`):
+«Cargué todo» retira todas las bolsas (`cargarCamion`), luego entrega
+con código en el orden sugerido (puede adelantar). Avisos: al chofer
+al asignar; al cliente «va en el camión» y cuando faltan ≤2 entregas
+antes de la suya (`avisosDeAvanceDeRuta`, dedupe en `alertas`). Gana
+`pagoPorEntrega` por entrega, por la liquidación normal. Alerta al
+operador si a una hora de la ventana hay programados sin ruta.
+
 **Pago a repartidores** (migración 019, `liquidaciones_reparto`):
 igual que con los feriantes. Gana la tarifa de cada viaje entregado
 (o cancelado después de retirar). El operador lo ve en «A pagar»,

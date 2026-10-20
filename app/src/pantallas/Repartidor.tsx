@@ -3,6 +3,7 @@ import { Alert, Linking, Platform, Pressable, StyleSheet, Switch, Text, TextInpu
 
 import { api, useTablero } from '../api';
 import { useEnviarUbicacion } from '../ubicacion';
+import RutaCamion from './RutaCamion';
 import { C, E, R, T, clp } from '../tema';
 import {
   Aviso, Boton, Cargando, Chip, Fila, Pantalla, Seccion, Tarjeta, Vacio, tonoEstado,
@@ -27,7 +28,7 @@ export default function Repartidor({ repartidorId }: { repartidorId: string }) {
 
   // Antes del primer return: la cantidad de hooks no puede cambiar
   // entre renders. Mientras lleva un viaje, la app manda dónde está.
-  useEnviarUbicacion(!!datos?.viajeActivo);
+  useEnviarUbicacion(!!datos?.viajeActivo || datos?.ruta?.estado === 'EN_CURSO');
 
   if (cargando) return <Cargando />;
   // Con datos en pantalla, una recarga que falla —la señal de la
@@ -97,6 +98,14 @@ export default function Repartidor({ repartidorId }: { repartidorId: string }) {
       ))}
     </Tarjeta>
   ) : null;
+
+  // Chofer del camión de la tarde: su pantalla es la ruta.
+  if (datos.ruta) {
+    return (
+      <RutaCamion ruta={datos.ruta} accion={accion} ocupado={ocupado}
+                  encabezado={<>{interruptor}{gananciaHoy}</>} />
+    );
+  }
 
   if (!viajeActivo) {
     return (
