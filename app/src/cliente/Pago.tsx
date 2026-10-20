@@ -6,7 +6,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { api } from '../api';
 import { C, E, R, T, clp } from '../tema';
 import { Boton, Cargando } from '../ui';
-import { Campo, EnFeria } from './piezas';
+import { Campo, EnFeria, caminoDeCotizacion, textoDespacho } from './piezas';
 import { Linea } from './Carrito';
 import { useCliente, type Perfil } from './estado';
 import PuntoEntrega, { puntoVigente } from './PuntoEntrega';
@@ -45,14 +45,26 @@ export default function Pago({
     return acc + (p ? p.precio_venta * cant : 0);
   }, 0);
 
+  // El despacho se cotiza con la distancia real: el punto marcado o,
+  // si no hay, la dirección escrita (con un respiro para no buscarla
+  // en cada letra).
+  const rubros = new Set(Object.keys(carro).map((id) => productos.find((x: any) => x.id === id)?.rubro_id).filter(Boolean)).size;
+  const puntoVigenteAhora = borrador.punto && borrador.punto.direccion.trim() === borrador.direccion.trim()
+    ? { lat: borrador.punto.lat, lng: borrador.punto.lng } : null;
+  const claveCotizacion = `${totalProductos}|${rubros}|${feriaId}|${puntoVigenteAhora ? `${puntoVigenteAhora.lat},${puntoVigenteAhora.lng}` : borrador.direccion.trim()}`;
   useEffect(() => {
     if (totalProductos === 0) return setCotizacion(null);
     let vigente = true;
-    api('GET', `/cotizar/${totalProductos}`)
-      .then((c) => { if (vigente) setCotizacion(c); })
-      .catch(() => {});
-    return () => { vigente = false; };
-  }, [totalProductos]);
+    const t = setTimeout(() => {
+      api('GET', caminoDeCotizacion(totalProductos, {
+        feriaId, rubros, punto: puntoVigenteAhora, direccion: borrador.direccion,
+      }))
+        .then((c) => { if (vigente) setCotizacion(c); })
+        .catch(() => {});
+    }, puntoVigenteAhora ? 0 : 1200);
+    return () => { vigente = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claveCotizacion]);
 
   if (!catalogo) return <Cargando />;
 
@@ -243,11 +255,19 @@ export default function Pago({
                    valor={clp(cotizacion.totalProductos)} />
             <Linea
               etiqueta="Despacho"
-              valor={cotizacion.despacho === 0 ? 'Gratis' : clp(cotizacion.despacho)}
+              valor={textoDespacho(cotizacion)}
               destacado={cotizacion.despacho === 0}
             />
             <View style={e.separador} />
             <Linea etiqueta="Total" valor={clp(cotizacion.total)} grande />
+            {cotizacion.distanciaKm != null && !cotizacion.fueraDeZona ? (
+              <Text style={T.micro}>
+                Despacho calculado a {String(cotizacion.distanciaKm).replace('.', ',')} km de la feria
+                {cotizacion.despacho === 0 ? ' · gratis por tu compra' : ' · es lo que gana tu repartidor'}.
+              </Text>
+            ) : cotizacion.estimado ? (
+              <Text style={T.micro}>El despacho exacto aparece al escribir tu dirección.</Text>
+            ) : null}
           </View>
         ) : null}
 
@@ -270,9 +290,13 @@ export default function Pago({
         <Boton
           titulo={pagando ? 'PROCESANDO…' : `PAGAR · ${clp(cotizacion?.total)}`}
           onPress={pagar}
-          deshabilitado={!completo || pagando || !cotizacion?.alcanzaMinimo}
+          deshabilitado={!completo || pagando || !cotizacion?.alcanzaMinimo || !!cotizacion?.fueraDeZona}
         />
-        {falta.length ? (
+        {cotizacion?.fueraDeZona ? (
+          <Text style={[T.micro, { textAlign: 'center', marginTop: E.s, color: C.rojo }]}>
+            Esa dirección queda a {String(cotizacion.distanciaKm).replace('.', ',')} km de la feria: repartimos hasta {cotizacion.maxKm} km.
+          </Text>
+        ) : falta.length ? (
           <Text style={[T.micro, { textAlign: 'center', marginTop: E.s, color: C.naranja }]}>
             Falta {falta.join(', ')}.
           </Text>

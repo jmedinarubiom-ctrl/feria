@@ -132,7 +132,7 @@ test('eliminar la cuenta borra los datos personales y conserva la venta sin nomb
 
   // La venta sigue —hay que poder dar cuenta de ella— pero ya no dice de quién era.
   const p = (await consultarUno<Fila>('SELECT * FROM pedidos WHERE id = ?', pedidoId))!;
-  assert.equal(p.total_venta, 4 * 2200 + CONFIG.despacho.costo);
+  assert.equal(p.total_venta, 4 * 2200 + p.costo_despacho);
   assert.equal(p.estado, 'ENTREGADO');
   assert.equal(p.cliente_id, null);
 

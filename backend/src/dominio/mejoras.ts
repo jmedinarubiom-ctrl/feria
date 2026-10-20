@@ -155,39 +155,38 @@ export async function calificar(pedidoId: string, clienteId: string, estrellasCr
 // Un viaje que nadie toma
 // ============================================================
 
-const MINUTOS_POR_ESCALON = Number(process.env.VIAJE_ESCALON_MINUTOS ?? 5);
-const ALZA_POR_ESCALON = Number(process.env.VIAJE_ALZA ?? 500);
-const ESCALONES = Number(process.env.VIAJE_ESCALONES ?? 4);
+const MINUTOS_POR_AVISO = Number(process.env.VIAJE_AVISO_MINUTOS ?? 5);
+const AVISOS = Number(process.env.VIAJE_AVISOS ?? 4);
 
 /**
- * Sube la tarifa de los viajes que llevan rato sin repartidor.
+ * Un viaje que nadie toma: se insiste, sin subir la tarifa.
  *
- * Un pedido listo en la feria sin nadie que lo lleve es mercadería
- * que se echa a perder. Cada 5 minutos la tarifa sube $500 (hasta
- * cuatro veces) y se les vuelve a avisar a los repartidores; al
- * operador se le avisa desde el primer escalón.
+ * Antes la tarifa subía $500 cada 5 minutos, pero eso no se le
+ * puede cobrar al cliente —ya pagó— y salía del margen de la feria.
+ * Ahora la tarifa queda como se cobró, y cada 5 minutos (hasta
+ * cuatro veces) se les vuelve a avisar a los repartidores. Al
+ * operador se le avisa desde la primera vez, para que lo asigne a
+ * mano si hace falta. Devuelve cuántos viajes se re-avisaron.
  */
 export async function escalarViajes(): Promise<number> {
   const viajes = await consultar<Fila>(
-    `SELECT v.id, v.pedido_id, v.tarifa, COALESCE(v.tarifa_base, v.tarifa) AS base, p.numero,
+    `SELECT v.id, v.pedido_id, p.numero,
             (extract(epoch FROM now() - v.creado_at) / 60)::int AS minutos
        FROM viajes v JOIN pedidos p ON p.id = v.pedido_id
       WHERE v.estado = ? AND v.repartidor_id IS NULL
         AND v.creado_at > now() - interval '3 hours'`, EstadoViaje.BUSCANDO);
-  let subidos = 0;
+  let avisados = 0;
   for (const v of viajes) {
-    const escalon = Math.min(ESCALONES, Math.floor(v.minutos / MINUTOS_POR_ESCALON));
-    const nueva = v.base + escalon * ALZA_POR_ESCALON;
-    if (escalon < 1 || nueva <= v.tarifa) continue;
+    const vez = Math.min(AVISOS, Math.floor(v.minutos / MINUTOS_POR_AVISO));
+    if (vez < 1) continue;
     const r = await ejecutar(
-      `UPDATE viajes SET tarifa = ?, tarifa_base = ? WHERE id = ? AND estado = ? AND tarifa < ?`,
-      nueva, v.base, v.id, EstadoViaje.BUSCANDO, nueva);
+      'INSERT INTO alertas (clave, texto) VALUES (?, ?) ON CONFLICT (clave) DO NOTHING',
+      `reaviso:viaje:${v.id}:${vez}`, `Pedido #${v.numero}: viaje sin repartidor (${v.minutos} min)`);
     if (r.afectadas !== 1) continue;
-    subidos++;
-    await registrarEvento('viaje', v.id, 'sube la tarifa', { de: v.tarifa, a: nueva, minutos: v.minutos });
-    // El mismo aviso de «viaje nuevo», ahora con el precio mejorado.
+    avisados++;
+    await registrarEvento('viaje', v.id, 'se vuelve a avisar', { minutos: v.minutos });
     publicar({ tipo: 'viaje:nuevo', viajeId: v.id, pedidoId: v.pedido_id });
-    if (escalon === 1) {
+    if (vez === 1) {
       const ops = await consultar<Fila>('SELECT push_token FROM operadores WHERE push_token IS NOT NULL');
       await enviarPush(ops.map((o) => ({
         to: o.push_token, title: `Pedido #${v.numero} sin repartidor`,
@@ -196,7 +195,7 @@ export async function escalarViajes(): Promise<number> {
       }))).catch(() => {});
     }
   }
-  return subidos;
+  return avisados;
 }
 
 /** El operador le entrega el viaje a un repartidor concreto. */

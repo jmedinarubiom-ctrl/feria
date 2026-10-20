@@ -138,8 +138,8 @@ test('lo que el cliente mande de más en el pedido se ignora', async () => {
   }, token);
   assert.equal(r.estado, 200, r.texto);
   const p = (await pedir('GET', `/pedidos/${r.json.pedidoId}`, undefined, token)).json;
-  assert.equal(p.costo_despacho, CONFIG.despacho.costo);
-  assert.equal(p.total_venta, 4 * 2200 + CONFIG.despacho.costo);
+  assert.ok(p.costo_despacho >= CONFIG.reparto.minimo, 'se cobra el despacho por distancia');
+  assert.equal(p.total_venta, 4 * 2200 + p.costo_despacho);
   assert.equal(p.feria_id, 'feria-av-argentina');
   assert.equal(p.estado, 'PENDIENTE_PAGO');
 });

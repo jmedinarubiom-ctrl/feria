@@ -11,6 +11,7 @@ import { publicar } from '../realtime/bus.ts';
 import { crearViaje, sincronizarParadas } from './reparto.ts';
 import { verificarHorario, horarioDeFeria } from './horario.ts';
 import { geocodificar } from './geocodificar.ts';
+import { despachoParaCliente, fueraDeZona, kmPorCalle, puntoDeFeria } from './tarifas.ts';
 
 // ============================================================
 // Cambios de estado
@@ -109,22 +110,37 @@ export class PedidoMuyChico extends Error {
  * mercadería antes que pagar el envío, y a ti te conviene que la
  * agregue, porque el reparto cuesta lo mismo lleve poco o mucho.
  */
-export function calcularDespacho(totalProductos: number): number {
-  return totalProductos >= CONFIG.despacho.gratisDesde ? 0 : CONFIG.despacho.costo;
+export function calcularDespacho(totalProductos: number, km = 0, rubros = 1): number {
+  return despachoParaCliente(totalProductos, km, rubros).despacho;
 }
 
-/** Lo que necesita la app para mostrar el carro antes de cobrar. */
-export function cotizar(totalProductos: number) {
-  const despacho = calcularDespacho(totalProductos);
+/**
+ * Lo que necesita la app para mostrar el carro antes de cobrar.
+ *
+ * Con `km` (la distancia a la dirección del cliente) el despacho es
+ * el de verdad. Sin dirección todavía, es el de un viaje corto y
+ * va marcado como estimado: la app dice «desde».
+ */
+export function cotizar(totalProductos: number, opciones: { km?: number | null; rubros?: number } = {}) {
+  const km = opciones.km ?? null;
+  const rubros = Math.max(1, opciones.rubros ?? 1);
+  const d = despachoParaCliente(totalProductos, km ?? 0, rubros);
+  const lejos = km !== null && fueraDeZona(km);
   return {
     totalProductos,
-    despacho,
-    total: totalProductos + despacho,
+    despacho: d.despacho,
+    total: totalProductos + d.despacho,
+    distanciaKm: km,
+    /** Sin dirección todavía: el despacho es un mínimo, no el final. */
+    estimado: km === null,
+    fueraDeZona: lejos,
+    maxKm: CONFIG.reparto.maxKm,
     minimo: CONFIG.despacho.pedidoMinimo,
     alcanzaMinimo: totalProductos >= CONFIG.despacho.pedidoMinimo,
     gratisDesde: CONFIG.despacho.gratisDesde,
-    /** Cuánto falta para que el despacho salga gratis. */
-    faltaParaGratis: despacho > 0
+    gratisHastaKm: CONFIG.despacho.gratisHastaKm,
+    /** Cuánto falta para que el despacho salga gratis (si la distancia lo permite). */
+    faltaParaGratis: d.despacho > 0 && (km === null || km <= CONFIG.despacho.gratisHastaKm)
       ? Math.max(0, CONFIG.despacho.gratisDesde - totalProductos)
       : 0,
   };
@@ -262,7 +278,14 @@ export async function crearPedido(entrada: PedidoEntrante): Promise<{ pedidoId: 
         `El pedido mínimo es ${CONFIG.despacho.pedidoMinimo}. Este es de ${totalProductos}.`);
     }
 
-    const costoDespacho = calcularDespacho(totalProductos);
+    // El despacho se cobra por distancia, desde la feria hasta el
+    // punto de entrega, y por la cantidad de puestos (uno por rubro).
+    const km = kmPorCalle(await puntoDeFeria(entrada.feriaId), punto);
+    if (fueraDeZona(km)) {
+      throw new ErrorNegocio(422,
+        `Esa dirección queda a ${km.toFixed(1)} km de la feria: repartimos hasta ${CONFIG.reparto.maxKm} km.`);
+    }
+    const costoDespacho = calcularDespacho(totalProductos, km, porRubro.size);
     const totalVenta = totalProductos + costoDespacho;
 
     const pedidoId = id();
@@ -280,8 +303,8 @@ export async function crearPedido(entrada: PedidoEntrante): Promise<{ pedidoId: 
     );
     const numero = creado!.numero;
     // El código que el cliente le dicta al repartidor al recibir.
-    await ejecutar('UPDATE pedidos SET codigo_entrega = ? WHERE id = ?',
-      String(randomInt(1000, 10000)), pedidoId);
+    await ejecutar('UPDATE pedidos SET codigo_entrega = ?, distancia_km = ? WHERE id = ?',
+      String(randomInt(1000, 10000)), km, pedidoId);
     await registrarEvento('pedido', pedidoId, 'creado',
       { numero, totalProductos, costoDespacho, totalVenta, rubros: [...porRubro.keys()] });
 

@@ -270,3 +270,28 @@ export function EnFeria({ nombre, prefijo = 'Comprando en', onPress, claro }: {
   );
   return onPress ? <Pressable onPress={onPress} hitSlop={8}>{fila}</Pressable> : fila;
 }
+
+/**
+ * La dirección de la cotización del despacho.
+ *
+ * El despacho depende de la distancia a la feria y de cuántos
+ * puestos hay que visitar (uno por rubro). Con el punto marcado en
+ * el mapa se mide desde ahí; si no, desde la dirección escrita.
+ */
+export function caminoDeCotizacion(total: number, o: {
+  feriaId: string; rubros: number; punto?: { lat: number; lng: number } | null; direccion?: string;
+}): string {
+  const q = new URLSearchParams({ feria: o.feriaId, rubros: String(Math.max(1, o.rubros)) });
+  if (o.punto) { q.set('lat', String(o.punto.lat)); q.set('lng', String(o.punto.lng)); }
+  else if (o.direccion && o.direccion.trim().length >= 6) q.set('direccion', o.direccion.trim());
+  return `/cotizar/${total}?${q.toString()}`;
+}
+
+/** Cómo se muestra el despacho en el resumen. */
+export function textoDespacho(c: any): string {
+  if (!c) return '…';
+  if (c.fueraDeZona) return 'Fuera de zona';
+  if (c.despacho === 0) return 'Gratis';
+  return (c.estimado ? 'desde ' : '') + clpCorto(c.despacho);
+}
+const clpCorto = (n: number) => '$' + Math.round(n).toLocaleString('es-CL');

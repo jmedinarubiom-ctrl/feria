@@ -373,7 +373,7 @@ test('una cuenta en uso no se toca, y una con pedido en curso tampoco', async ()
   const conPedido = await entrar('+56912345678');
   const { pedidoId } = await crearPedido({
     feriaId: FERIA_ID, clienteId: conPedido.actorId, clienteNombre: 'Otra',
-    clienteTelefono: '+56912345678', direccion: 'Calle 1', lat: -33, lng: -71,
+    clienteTelefono: '+56912345678', direccion: 'Calle 1', lat: -33.04, lng: -71.61,
     items: [{ productoId: 'p-tomate', cantidad: 4 }],
   });
   await confirmarPago(pedidoId);

@@ -63,6 +63,8 @@ import {
 } from '../dominio/archivos.ts';
 import { leerReferencia, creditos } from '../dominio/referencia.ts';
 import { latir } from '../motor.ts';
+import { kmPorCalle, puntoDeFeria } from '../dominio/tarifas.ts';
+import { geocodificar } from '../dominio/geocodificar.ts';
 import {
   anotarParaElRepartidor, calificar, compensar, escalarViajes, marcarFaltante,
   pagosPorConfirmar, repartidorParaAsignar,
@@ -597,7 +599,22 @@ POST('/pedidos', async (c) => {
 });
 
 /** Lo que necesita el carro para mostrar el total antes de cobrar. */
-GET('/cotizar/:total', async (c) => cotizar(Number(c.params.total) || 0));
+GET('/cotizar/:total', async (c) => {
+  // La distancia sale del punto marcado o, si no hay, de la dirección
+  // escrita. Sin ninguno de los dos, el despacho es un «desde».
+  const feriaId = c.consulta.get('feria') || FERIA_ID;
+  const rubros = Math.min(10, Math.max(1, Number(c.consulta.get('rubros')) || 1));
+  const lat = Number(c.consulta.get('lat')), lng = Number(c.consulta.get('lng'));
+  let destino: { lat: number; lng: number } | null =
+    c.consulta.get('lat') && Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+  const direccion = (c.consulta.get('direccion') ?? '').trim();
+  if (!destino && direccion.length >= 6) {
+    const f = await consultarUno<Fila>('SELECT comuna FROM ferias WHERE id = ?', feriaId);
+    destino = await geocodificar(direccion, { ciudad: `${f?.comuna ?? 'Valparaíso'}, Chile` }).catch(() => null);
+  }
+  const km = destino ? kmPorCalle(await puntoDeFeria(feriaId), destino) : null;
+  return cotizar(Number(c.params.total) || 0, { km, rubros });
+});
 
 /**
  * El pedido, para el seguimiento del cliente y para el panel.

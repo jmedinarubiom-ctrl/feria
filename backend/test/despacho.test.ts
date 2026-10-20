@@ -63,8 +63,10 @@ test('parte el pedido en un sub-pedido por rubro', async () => {
 
   const pedido = await consultarUno<Fila>('SELECT * FROM pedidos WHERE id = ?', pedidoId);
   assert.equal(pedido!.total_productos, 2200 * 2 + 1900 + 5900 + 6500);
-  assert.equal(pedido!.costo_despacho, 2500, 'se le cobra el despacho');
-  assert.equal(pedido!.total_venta, pedido!.total_productos + 2500);
+  // Tres rubros son tres puestos: el despacho es lo que va a ganar
+  // el repartidor por ese viaje (tarifa plana en los tests: 2500 + 2 × 500).
+  assert.equal(pedido!.costo_despacho, 3500, 'se le cobra el despacho, por puestos');
+  assert.equal(pedido!.total_venta, pedido!.total_productos + 3500);
   assert.equal(pedido!.estado, 'DESPACHANDO');
 });
 

@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../api';
 import { C, E, R, T, clp } from '../tema';
 import { Boton, Cargando, Vacio } from '../ui';
-import { Contador, EnFeria } from './piezas';
+import { Contador, EnFeria, caminoDeCotizacion, textoDespacho } from './piezas';
 import { Foto } from '../producto';
 import { simboloProducto } from '../simbolos';
 import { useCliente } from './estado';
@@ -19,7 +19,7 @@ export default function Carrito({
   navegar: (p: string, args?: any) => void;
   volver: () => void;
 }) {
-  const { carro, fijarCantidad, vaciar, unidades, feriaId } = useCliente();
+  const { carro, fijarCantidad, vaciar, unidades, feriaId, perfil } = useCliente();
 
   // Con productos en el carrito tiene sentido pedir permiso para
   // avisar: «tu carrito te espera», «tu pedido va en camino». Antes
@@ -48,14 +48,16 @@ export default function Carrito({
   // La cotización la hace el servidor: el despacho y el mínimo son
   // una sola regla y duplicarla acá sería la forma más fácil de que
   // un día no coincidan.
+  const rubros = new Set(lineas.map((l) => l.p.rubro_id)).size;
+  const direccionPerfil = perfil?.direccion ?? '';
   useEffect(() => {
     if (totalProductos === 0) return setCotizacion(null);
     let vigente = true;
-    api('GET', `/cotizar/${totalProductos}`)
+    api('GET', caminoDeCotizacion(totalProductos, { feriaId, rubros, direccion: direccionPerfil }))
       .then((c) => { if (vigente) setCotizacion(c); })
       .catch(() => {});
     return () => { vigente = false; };
-  }, [totalProductos]);
+  }, [totalProductos, rubros, feriaId, direccionPerfil]);
 
   if (!catalogo) return <Cargando />;
 
@@ -123,12 +125,21 @@ export default function Carrito({
                        valor={clp(cotizacion.totalProductos)} />
                 <Linea
                   etiqueta="Despacho"
-                  valor={cotizacion.despacho === 0 ? 'Gratis' : clp(cotizacion.despacho)}
+                  valor={textoDespacho(cotizacion)}
                   destacado={cotizacion.despacho === 0}
                 />
                 <View style={e.separador} />
                 <Linea etiqueta="Total" valor={clp(cotizacion.total)} grande />
 
+                {cotizacion.estimado ? (
+                  <Text style={[T.micro, { textAlign: 'center' }]}>
+                    El despacho depende de la distancia: el valor exacto lo ves al poner tu dirección.
+                  </Text>
+                ) : cotizacion.distanciaKm != null ? (
+                  <Text style={[T.micro, { textAlign: 'center' }]}>
+                    Despacho a {String(cotizacion.distanciaKm).replace('.', ',')} km de la feria.
+                  </Text>
+                ) : null}
                 {/* Es la razón por la que el cliente agrega una malla más. */}
                 {cotizacion.faltaParaGratis > 0 && cotizacion.alcanzaMinimo ? (
                   <View style={e.franja}>

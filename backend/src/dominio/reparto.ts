@@ -7,6 +7,7 @@ import {
 } from './estados.ts';
 import { publicar } from '../realtime/bus.ts';
 import { evaluarPedido } from './despacho.ts';
+import { kmPorCalle, puntoDeFeria, tarifaReparto } from './tarifas.ts';
 
 async function cambiarEstadoViaje(
   viajeId: string, hacia: EstadoViaje, extra: Fila = {},
@@ -46,8 +47,13 @@ export async function crearViaje(pedidoId: string): Promise<string> {
   const retiros = await retirosPendientes(pedidoId);
 
   const viajeId = id();
-  const tarifa = CONFIG.tarifaReparto
-    + Math.max(0, retiros.length - 1) * CONFIG.tarifaPorParadaExtra;
+  // Por distancia y por puestos: los mismos números con que se le
+  // cobró el despacho al cliente. Pedidos de antes de la regla no
+  // tienen distancia guardada: se mide ahora.
+  const km = pedido!.distancia_km != null
+    ? Number(pedido!.distancia_km)
+    : kmPorCalle(await puntoDeFeria(pedido!.feria_id), { lat: pedido!.lat, lng: pedido!.lng });
+  const tarifa = tarifaReparto(km, retiros.length);
   await ejecutar(
     `INSERT INTO viajes (id, pedido_id, estado, tarifa, tarifa_base) VALUES (?, ?, ?, ?, ?)`,
     viajeId, pedidoId, EstadoViaje.BUSCANDO, tarifa, tarifa,

@@ -112,24 +112,24 @@ test('faltante: no se le paga al puesto, se le devuelve al cliente y el repartid
 
 // ---------- 3 · viaje que nadie toma ----------
 
-test('un viaje sin repartidor sube de tarifa cada 5 minutos, hasta un tope', async () => {
+test('un viaje sin repartidor se vuelve a avisar cada 5 minutos, sin subir la tarifa', async () => {
   const { pedidoId } = await pedidoDe(await nuevoCliente('cli-0004'));
   const s = await sub(pedidoId);
   await aceptarOferta(s.id, 'f-jose');
   const viaje = (await consultarUno<Fila>('SELECT * FROM viajes WHERE pedido_id = ?', pedidoId))!;
-  assert.equal(await escalarViajes(), 0, 'recién creado no sube');
+  assert.equal(await escalarViajes(), 0, 'recién creado no se re-avisa');
 
   await ejecutar(`UPDATE viajes SET creado_at = now() - interval '6 minutes' WHERE id = ?`, viaje.id);
   assert.equal(await escalarViajes(), 1);
-  assert.equal((await consultarUno<Fila>('SELECT tarifa FROM viajes WHERE id = ?', viaje.id))!.tarifa, viaje.tarifa + 500);
-  assert.equal(await escalarViajes(), 0, 'no vuelve a subir en el mismo escalón');
-
-  await ejecutar(`UPDATE viajes SET creado_at = now() - interval '90 minutes' WHERE id = ?`, viaje.id);
-  await escalarViajes();
-  assert.equal((await consultarUno<Fila>('SELECT tarifa FROM viajes WHERE id = ?', viaje.id))!.tarifa, viaje.tarifa + 2000, 'tope de cuatro alzas');
+  assert.equal(await escalarViajes(), 0, 'una sola vez por tramo');
+  await ejecutar(`UPDATE viajes SET creado_at = now() - interval '11 minutes' WHERE id = ?`, viaje.id);
+  assert.equal(await escalarViajes(), 1, 'a los 10 minutos, otra vez');
+  assert.equal((await consultarUno<Fila>('SELECT tarifa FROM viajes WHERE id = ?', viaje.id))!.tarifa, viaje.tarifa,
+    'la tarifa queda como se le cobró al cliente');
 
   await aceptarViaje(viaje.id, 'r-diego');
-  assert.equal(await escalarViajes(), 0, 'tomado ya no sube');
+  await ejecutar(`UPDATE viajes SET creado_at = now() - interval '30 minutes' WHERE id = ?`, viaje.id);
+  assert.equal(await escalarViajes(), 0, 'tomado ya no se re-avisa');
 });
 
 // ---------- 4 · hora estimada ----------

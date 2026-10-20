@@ -398,9 +398,10 @@ migración 017, `test/reparto-confiable.test.ts`):
 - **Devoluciones parciales** (`reembolsarParte`): ahora
   `monto_reembolsado` se ACUMULA; antes cada devolución pisaba la
   anterior. `POST /operador/pedidos/:id/compensar` con motivo.
-- **Viaje sin repartidor**: sube $500 cada 5 minutos, hasta cuatro
-  veces (`escalarViajes`, con el latido), re-avisa a los
-  repartidores y al operador. `POST /operador/viajes/:id/asignar`.
+- **Viaje sin repartidor**: ya NO sube la tarifa (no se le puede
+  cobrar al cliente, que ya pagó). Cada 5 minutos, hasta cuatro
+  veces, se re-avisa a los repartidores y al operador
+  (`escalarViajes`). `POST /operador/viajes/:id/asignar`.
 - **Hora estimada** (`estimarLlegada`): línea recta × 1,4 a 18 km/h
   más 4 min por retiro pendiente. Es una estimación gruesa, sin
   tránsito. El cliente ve además el mapa con el repartidor en ruta.
@@ -417,6 +418,30 @@ migración 017, `test/reparto-confiable.test.ts`):
   no cuando terminan: eso no cambió.
 - Sin hacer: registrar el peso real por producto. La devolución
   parcial con motivo es lo que hay para un reclamo de peso.
+
+## Tarifa del reparto por distancia (20 de octubre de 2026)
+
+`dominio/tarifas.ts`. El cliente paga de despacho **lo mismo que gana
+el repartidor**, calculado antes de pagar:
+
+    tarifa = base + porKm × km + porPuestoExtra × (puestos − 1)
+    km = línea recta feria → punto de entrega × factorCalle (1,4)
+    redondeado a la centena hacia arriba, nunca menos que `minimo`
+
+Valores en `CONFIG.reparto` (variables `REPARTO_*`): base $1.500,
+$500 por km, $400 por puesto extra, mínimo $2.000, hasta 15 km
+(más lejos se rechaza el pedido). Despacho gratis desde $25.000,
+**solo hasta 4 km** (`gratisHastaKm`). Puestos = rubros del pedido
+para el cliente, paradas reales para el repartidor (casi siempre
+iguales). `pedidos.distancia_km` guarda la distancia cobrada;
+`ferias.lat/lng` (migración 018; solo Av. Argentina tiene). Sin
+dirección ubicable, el punto cae en la feria y se cobra el mínimo.
+`GET /cotizar/:total?feria&rubros&lat&lng|direccion`.
+
+**Las pruebas corren con tarifa plana** (2500 + 500 por puesto, sin
+km: variables en `package.json`) para que los montos fijos de los
+tests antiguos sigan valiendo; la fórmula por distancia tiene su
+prueba con parámetros explícitos en `despacho-precios.test.ts`.
 
 ## Notificaciones
 

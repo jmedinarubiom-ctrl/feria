@@ -44,10 +44,26 @@ export const CONFIG = {
     },
   ],
 
-  /** Tarifa base del repartidor, CLP. Es lo que TE CUESTA el reparto. */
-  tarifaReparto: 2500,
-  /** Extra por cada puesto adicional de retiro. */
-  tarifaPorParadaExtra: 500,
+  /**
+   * Lo que gana el repartidor por viaje, y lo que paga el cliente de
+   * despacho (es el mismo número: ver `dominio/tarifas.ts`).
+   *
+   * tarifa = base + porKm × km por calle + porPuestoExtra × (puestos − 1)
+   * redondeada a la centena hacia arriba, nunca menos que `minimo`.
+   * Son un punto de partida: hay que ajustarlos con lo que pagan
+   * otras apps en la zona y el costo real de subir a los cerros.
+   */
+  reparto: {
+    base: Number(process.env.REPARTO_BASE ?? 1500),
+    porKm: Number(process.env.REPARTO_POR_KM ?? 500),
+    porPuestoExtra: Number(process.env.REPARTO_POR_PUESTO ?? 400),
+    minimo: Number(process.env.REPARTO_MINIMO ?? 2000),
+    /** Cuánto más largo es ir por calle que en línea recta. */
+    factorCalle: Number(process.env.REPARTO_FACTOR_CALLE ?? 1.4),
+    /** Más lejos que esto (km por calle) no se reparte. */
+    maxKm: Number(process.env.REPARTO_MAX_KM ?? 15),
+  },
+
 
   /**
    * Lo que le cobras al cliente por el despacho.
@@ -58,6 +74,7 @@ export const CONFIG = {
    * los pedidos de un solo puesto subsidian a los de varios.
    */
   despacho: {
+    /** Ya no se usa: el despacho se calcula por distancia (`reparto`). */
     costo: 2500,
     /**
      * Sobre este monto el despacho va gratis. Es la palanca más
@@ -65,6 +82,8 @@ export const CONFIG = {
      * agregar $4.000 de verdura antes que pagar $2.500 de envío.
      */
     gratisDesde: 25_000,
+    /** …y solo dentro de este radio (km por calle). Lejos se cobra. */
+    gratisHastaKm: Number(process.env.DESPACHO_GRATIS_HASTA_KM ?? 4),
     /**
      * Debajo de esto no se acepta el pedido. Un carro de $3.000 no
      * paga el viaje del repartidor ni con despacho cobrado.
