@@ -428,10 +428,17 @@ el repartidor**, calculado antes de pagar:
     km = línea recta feria → punto de entrega × factorCalle (1,4)
     redondeado a la centena hacia arriba, nunca menos que `minimo`
 
-Valores en `CONFIG.reparto` (variables `REPARTO_*`): base $1.500,
-$500 por km los primeros 5 km y $300 por km después (tramos),
-$400 por puesto extra, mínimo $2.000, hasta 18 km (más lejos se
-rechaza el pedido). Despacho gratis desde $25.000,
+Valores en `CONFIG.reparto` (variables `REPARTO_*`), calibrados
+en octubre de 2026 con datos actuales: base $1.300, $530 por km los
+primeros 5 km y $420 después, $400 por puesto extra, mínimo $1.800,
+factor calle 1,45, hasta 18 km. Supuestos: tiempo a $6.000/h (~1,6×
+el piso de la Ley 21.431 con ingreso mínimo $553.553), moto a $62/km
+(bencina 93 ~$1.300/l), 22 km/h cerca y 30 km/h lejos, 8 min de
+retiro + 4 por puesto extra + 5 de entrega, vuelta incluida. El
+factor 1,45 salió de 61 rutas reales de OpenStreetMap (OSRM) desde
+las siete ferias: la tarifa estimada queda a ±11 % de la real en el
+80 % de los casos. Si cambian la bencina o el ingreso mínimo, se
+recalcula con la misma cuenta. Despacho gratis desde $25.000,
 **solo hasta 4 km** (`gratisHastaKm`). Puestos = rubros del pedido
 para el cliente, paradas reales para el repartidor (casi siempre
 iguales). `pedidos.distancia_km` guarda la distancia cobrada;

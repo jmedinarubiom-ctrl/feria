@@ -54,22 +54,38 @@ export const CONFIG = {
    * otras apps en la zona y el costo real de subir a los cerros.
    */
   reparto: {
-    base: Number(process.env.REPARTO_BASE ?? 1500),
-    porKm: Number(process.env.REPARTO_POR_KM ?? 500),
+    // Calibrado en octubre de 2026 (ver CLAUDE.md, «Tarifa del reparto»):
+    //  · tiempo a $6.000 la hora, ~1,6× el piso de la Ley 21.431
+    //    (ingreso mínimo $553.553 / 180 h × 1,2 = $3.690 la hora);
+    //  · moto a $62 por km (bencina 93 a ~$1.300 el litro, 35 km/l, y
+    //    $25/km de mantención), contando la vuelta a la feria;
+    //  · 22 km/h en los primeros 5 km y 30 km/h después;
+    //  · 8 min para retirar en la feria, 4 por cada puesto extra y 5
+    //    para entregar.
+    // Con eso el repartidor gana, neto de bencina, entre $4.700 y
+    // $5.400 por hora contando el regreso.
+    base: Number(process.env.REPARTO_BASE ?? 1300),
+    porKm: Number(process.env.REPARTO_POR_KM ?? 530),
     /**
-     * Pasados `kmTramo`, cada km cuesta `porKmLejos`. Un viaje largo
-     * no cuesta proporcionalmente lo mismo que uno corto: lo que pesa
-     * es salir, estacionar y subir; el resto es avenida.
+     * Pasados `kmTramo`, cada km cuesta `porKmLejos`: en avenida se
+     * anda más rápido que subiendo un cerro.
      */
     kmTramo: Number(process.env.REPARTO_KM_TRAMO ?? 5),
-    porKmLejos: Number(process.env.REPARTO_POR_KM_LEJOS ?? 300),
+    porKmLejos: Number(process.env.REPARTO_POR_KM_LEJOS ?? 420),
     porPuestoExtra: Number(process.env.REPARTO_POR_PUESTO ?? 400),
-    minimo: Number(process.env.REPARTO_MINIMO ?? 2000),
-    /** Cuánto más largo es ir por calle que en línea recta. */
-    factorCalle: Number(process.env.REPARTO_FACTOR_CALLE ?? 1.4),
+    minimo: Number(process.env.REPARTO_MINIMO ?? 1800),
+    /**
+     * Cuánto más largo es ir por calle que en línea recta. Medido con
+     * el ruteador de OpenStreetMap en 61 viajes reales desde las siete
+     * ferias: mediana 1,44 (1,55 en los cortos). Con 1,45 la tarifa
+     * estimada queda dentro de ±11 % de la de la ruta real en el 80 %
+     * de los casos.
+     */
+    factorCalle: Number(process.env.REPARTO_FACTOR_CALLE ?? 1.45),
     /** Más lejos que esto (km por calle) no se reparte. */
     maxKm: Number(process.env.REPARTO_MAX_KM ?? 18),
   },
+
 
 
   /**
