@@ -34,7 +34,7 @@ async function abrirMargaMarga() {
     nombre: 'Elena Tapia', puesto: 'Puesto 8', telefono: '+56976543210', rubros: ['verduras'],
   }, MARGA);
   await ejecutar('UPDATE feriantes SET conectado = true WHERE id = ?', f.id);
-  await actualizarFeria(MARGA, { activa: true });
+  await actualizarFeria(MARGA, { activa: true, ubicacion: '-33.0265, -71.5500' });
   return f.id as string;
 }
 

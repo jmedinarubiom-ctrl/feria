@@ -50,7 +50,7 @@ export async function trabajoDelFeriante(ferianteId: string) {
 /** Viajes que puede tomar un repartidor, con sus paradas. */
 export async function viajesDisponibles(feriaId?: string) {
   const filas = await consultar<Fila>(
-    `SELECT v.*, p.numero, p.direccion, p.feria_id,
+    `SELECT v.*, p.numero, p.direccion, p.feria_id, p.distancia_km,
             (SELECT COUNT(*)::int FROM paradas
               WHERE viaje_id = v.id AND tipo = 'RETIRO') AS retiros
        FROM viajes v
@@ -68,7 +68,7 @@ export async function viajesDisponibles(feriaId?: string) {
 export async function viajeActivo(repartidorId: string) {
   const viaje = await consultarUno<Fila>(
     `SELECT v.*, p.numero, p.cliente_nombre, p.cliente_telefono, p.direccion, p.notas,
-            p.geo_precision
+            p.geo_precision, p.distancia_km
        FROM viajes v JOIN pedidos p ON p.id = v.pedido_id
       WHERE v.repartidor_id = ? AND v.estado IN (?, ?, ?)`,
     repartidorId, EstadoViaje.ASIGNADO, EstadoViaje.RETIRANDO, EstadoViaje.EN_RUTA);

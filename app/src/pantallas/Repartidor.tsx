@@ -72,10 +72,37 @@ export default function Repartidor({ repartidorId }: { repartidorId: string }) {
     </View>
   );
 
+  // Lo que lleva ganado hoy, y los pagos de otros días sin confirmar.
+  const ganancia = datos.ganancia;
+  const gananciaHoy = ganancia ? (
+    <Tarjeta style={{ marginBottom: E.l }}>
+      <Text style={T.seccion}>Lo que llevas hoy</Text>
+      <Text style={[T.cifraMedia, { color: C.verdeOscuro, marginTop: 2 }]}>{clp(ganancia.total)}</Text>
+      <Text style={T.apoyo}>
+        {ganancia.cantidad} {ganancia.cantidad === 1 ? 'viaje' : 'viajes'}
+        {ganancia.pagado > 0 ? ` · ya recibiste ${clp(ganancia.pagado)}` : ''}
+      </Text>
+      {ganancia.pagadoAt && !ganancia.confirmadoAt ? (
+        <View style={{ marginTop: E.m }}>
+          <Boton titulo={`RECIBÍ ${clp(ganancia.pagado)}`} deshabilitado={ocupado}
+                 onPress={() => accion(() => api('POST', '/repartidor/liquidacion/confirmar'))} />
+        </View>
+      ) : null}
+      {(datos.pagosPorConfirmar ?? []).filter((p: any) => p.fecha !== ganancia.fecha).map((p: any) => (
+        <View key={p.fecha} style={{ marginTop: E.m }}>
+          <Text style={T.micro}>Pago del {p.fecha.split('-').reverse().slice(0, 2).join('/')}: {clp(p.monto)}</Text>
+          <Boton titulo={`RECIBÍ ${clp(p.monto)}`} variante="secundario" deshabilitado={ocupado}
+                 onPress={() => accion(() => api('POST', '/repartidor/liquidacion/confirmar', { cuerpo: { fecha: p.fecha } }))} />
+        </View>
+      ))}
+    </Tarjeta>
+  ) : null;
+
   if (!viajeActivo) {
     return (
       <Pantalla titulo="Viajes">
         {interruptor}
+        {gananciaHoy}
         {disponibles.length === 0 ? (
           <Seccion>
             <Vacio texto={'No hay viajes ahora.\nCuando un pedido esté listo, aparece acá.'} />
@@ -89,7 +116,9 @@ export default function Repartidor({ repartidorId }: { repartidorId: string }) {
                   <Text style={[T.cifraMedia, { color: C.verdeOscuro }]}>{clp(v.tarifa)}</Text>
                 </View>
                 <Text style={[T.apoyo, { marginTop: 2 }]}>
-                  {v.retiros} {v.retiros === 1 ? 'puesto' : 'puestos'} · {v.direccion}
+                  {v.retiros} {v.retiros === 1 ? 'puesto' : 'puestos'}
+                  {v.distancia_km != null ? ` · ${String(v.distancia_km).replace('.', ',')} km` : ''}
+                  {' · '}{v.direccion}
                 </Text>
                 <View style={{ marginTop: E.m }}>
                   <Boton

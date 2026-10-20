@@ -429,12 +429,22 @@ el repartidor**, calculado antes de pagar:
     redondeado a la centena hacia arriba, nunca menos que `minimo`
 
 Valores en `CONFIG.reparto` (variables `REPARTO_*`): base $1.500,
-$500 por km, $400 por puesto extra, mínimo $2.000, hasta 15 km
-(más lejos se rechaza el pedido). Despacho gratis desde $25.000,
+$500 por km los primeros 5 km y $300 por km después (tramos),
+$400 por puesto extra, mínimo $2.000, hasta 18 km (más lejos se
+rechaza el pedido). Despacho gratis desde $25.000,
 **solo hasta 4 km** (`gratisHastaKm`). Puestos = rubros del pedido
 para el cliente, paradas reales para el repartidor (casi siempre
 iguales). `pedidos.distancia_km` guarda la distancia cobrada;
-`ferias.lat/lng` (migración 018; solo Av. Argentina tiene). Sin
+`ferias.lat/lng` (migraciones 018 y 019). Solo Av. Argentina tiene
+la ubicación confirmada; las demás tienen un punto APROXIMADO y
+`ubicacion_revisada = false`: no se pueden abrir hasta que el
+operador confirme la ubicación en el panel (Ferias).
+
+**Pago a repartidores** (migración 019, `liquidaciones_reparto`):
+igual que con los feriantes. Gana la tarifa de cada viaje entregado
+(o cancelado después de retirar). El operador lo ve en «A pagar»,
+marca «Pagué» y el repartidor lo confirma en su app, también los de
+otros días. `calcularGananciaRepartidor`, `liquidacionesRepartoDelDia`. Sin
 dirección ubicable, el punto cae en la feria y se cobra el mínimo.
 `GET /cotizar/:total?feria&rubros&lat&lng|direccion`.
 

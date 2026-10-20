@@ -56,12 +56,19 @@ export const CONFIG = {
   reparto: {
     base: Number(process.env.REPARTO_BASE ?? 1500),
     porKm: Number(process.env.REPARTO_POR_KM ?? 500),
+    /**
+     * Pasados `kmTramo`, cada km cuesta `porKmLejos`. Un viaje largo
+     * no cuesta proporcionalmente lo mismo que uno corto: lo que pesa
+     * es salir, estacionar y subir; el resto es avenida.
+     */
+    kmTramo: Number(process.env.REPARTO_KM_TRAMO ?? 5),
+    porKmLejos: Number(process.env.REPARTO_POR_KM_LEJOS ?? 300),
     porPuestoExtra: Number(process.env.REPARTO_POR_PUESTO ?? 400),
     minimo: Number(process.env.REPARTO_MINIMO ?? 2000),
     /** Cuánto más largo es ir por calle que en línea recta. */
     factorCalle: Number(process.env.REPARTO_FACTOR_CALLE ?? 1.4),
     /** Más lejos que esto (km por calle) no se reparte. */
-    maxKm: Number(process.env.REPARTO_MAX_KM ?? 15),
+    maxKm: Number(process.env.REPARTO_MAX_KM ?? 18),
   },
 
 

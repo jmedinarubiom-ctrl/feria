@@ -32,9 +32,26 @@ export const kmPorCalle = (a: Punto, b: Punto): number =>
 const redondear = (n: number) => Math.ceil(n / 100) * 100;
 
 /** Lo que gana el repartidor por un viaje. */
-export function tarifaReparto(km: number, puestos: number, r = CONFIG.reparto): number {
-  const bruto = r.base + r.porKm * Math.max(0, km) + r.porPuestoExtra * Math.max(0, puestos - 1);
+export function tarifaReparto(
+  km: number, puestos: number,
+  r: { base: number; porKm: number; porPuestoExtra: number; minimo: number; kmTramo?: number; porKmLejos?: number } = CONFIG.reparto,
+): number {
+  const d = Math.max(0, km);
+  const tramo = r.kmTramo ?? Infinity;
+  const porDistancia = r.porKm * Math.min(d, tramo) + (r.porKmLejos ?? r.porKm) * Math.max(0, d - tramo);
+  const bruto = r.base + porDistancia + r.porPuestoExtra * Math.max(0, puestos - 1);
   return Math.max(r.minimo, redondear(bruto));
+}
+
+/** El detalle de una tarifa, para mostrárselo al repartidor y al cliente. */
+export function desgloseDeTarifa(km: number, puestos: number) {
+  const r = CONFIG.reparto;
+  return {
+    km, puestos, base: r.base,
+    porDistancia: tarifaReparto(km, 1) - r.base > 0 ? tarifaReparto(km, 1) - r.base : 0,
+    porPuestos: r.porPuestoExtra * Math.max(0, puestos - 1),
+    total: tarifaReparto(km, puestos),
+  };
 }
 
 export const fueraDeZona = (km: number): boolean => km > CONFIG.reparto.maxKm;

@@ -142,3 +142,99 @@ export async function confirmarRecepcion(ferianteId: string, fecha = hoy()) {
   await registrarEvento('liquidacion', ferianteId, 'confirmado', { fecha });
   return calcularLiquidacion(ferianteId, fecha);
 }
+
+// ============================================================
+// Repartidores
+// ============================================================
+
+/**
+ * Lo que ganó un repartidor en un día: la tarifa de cada viaje que
+ * entregó. Un viaje que se canceló después de que retiró algo
+ * también se paga: hizo el recorrido.
+ */
+const VIAJES_DEL_DIA = `
+  SELECT v.id, v.tarifa, p.numero, COALESCE(v.entregado_at, v.iniciado_at) AS momento
+    FROM viajes v JOIN pedidos p ON p.id = v.pedido_id
+   WHERE v.repartidor_id = ?
+     AND (v.estado = 'ENTREGADO' OR (v.estado = 'CANCELADO' AND v.iniciado_at IS NOT NULL))
+     AND ${diaDe('COALESCE(v.entregado_at, v.iniciado_at)')} = ?::date
+   ORDER BY momento`;
+
+export async function calcularGananciaRepartidor(repartidorId: string, fecha = hoy()) {
+  const viajes = await consultar<Fila>(VIAJES_DEL_DIA, repartidorId, fecha);
+  const total = viajes.reduce((a, v) => a + v.tarifa, 0);
+  const registro = await consultarUno<Fila>(
+    'SELECT * FROM liquidaciones_reparto WHERE repartidor_id = ? AND fecha = ?::date', repartidorId, fecha);
+  const pagado = registro?.pagado_at ? registro.monto_total : 0;
+  return {
+    repartidorId, fecha, total, pagado,
+    pendiente: Math.max(0, total - pagado),
+    cantidad: viajes.length, viajes,
+    pagadoAt: registro?.pagado_at ?? null,
+    confirmadoAt: registro?.confirmado_at ?? null,
+  };
+}
+
+/** Para el operador: a qué repartidor le tiene que pagar y cuánto. */
+export async function liquidacionesRepartoDelDia(fecha = hoy()) {
+  const filas = await consultar<Fila>(
+    `SELECT r.id, r.nombre, r.telefono, r.vehiculo,
+            COUNT(v.id)::int AS cantidad, SUM(v.tarifa)::int AS total,
+            l.pagado_at, l.confirmado_at, l.monto_total AS monto_pagado
+       FROM viajes v
+       JOIN repartidores r ON r.id = v.repartidor_id
+       LEFT JOIN liquidaciones_reparto l ON l.repartidor_id = r.id AND l.fecha = ?::date
+      WHERE (v.estado = 'ENTREGADO' OR (v.estado = 'CANCELADO' AND v.iniciado_at IS NOT NULL))
+        AND ${diaDe('COALESCE(v.entregado_at, v.iniciado_at)')} = ?::date
+      GROUP BY r.id, l.pagado_at, l.confirmado_at, l.monto_total
+      ORDER BY total DESC`, fecha, fecha);
+  const lista = filas.map((f) => {
+    const pagado = f.pagado_at ? f.monto_pagado ?? 0 : 0;
+    return { ...f, pagado, pendiente: Math.max(0, f.total - pagado) };
+  });
+  return {
+    fecha,
+    totalAPagar: lista.reduce((a, f) => a + f.pendiente, 0),
+    totalDelDia: lista.reduce((a, f) => a + f.total, 0),
+    repartidores: lista,
+  };
+}
+
+/** El operador anota que le pagó. Si ya le había pagado una parte, queda el total nuevo. */
+export async function marcarPagadoRepartidor(repartidorId: string, fecha = hoy()) {
+  return enTransaccion(async () => {
+    const calc = await calcularGananciaRepartidor(repartidorId, fecha);
+    if (calc.cantidad === 0) throw new ErrorNegocio(409, 'Ese repartidor no tiene viajes que pagar en esa fecha.');
+    const existente = await consultarUno<Fila>(
+      'SELECT * FROM liquidaciones_reparto WHERE repartidor_id = ? AND fecha = ?::date', repartidorId, fecha);
+    if (existente?.pagado_at && calc.pendiente === 0) return calc;
+    if (existente) {
+      await ejecutar(
+        `UPDATE liquidaciones_reparto SET monto_total = ?, cantidad_viajes = ?, pagado_at = ?, confirmado_at = NULL
+          WHERE id = ?`, calc.total, calc.cantidad, ahora(), existente.id);
+    } else {
+      await ejecutar(
+        `INSERT INTO liquidaciones_reparto (id, repartidor_id, fecha, monto_total, cantidad_viajes, pagado_at)
+         VALUES (?, ?, ?::date, ?, ?, ?)`, id(), repartidorId, fecha, calc.total, calc.cantidad, ahora());
+    }
+    await registrarEvento('liquidacion_reparto', repartidorId, 'pagado', { fecha, monto: calc.total });
+    return calcularGananciaRepartidor(repartidorId, fecha);
+  });
+}
+
+/** El repartidor confirma en su app que recibió la plata. */
+export async function confirmarPagoRepartidor(repartidorId: string, fecha = hoy()) {
+  const registro = await consultarUno<Fila>(
+    'SELECT * FROM liquidaciones_reparto WHERE repartidor_id = ? AND fecha = ?::date', repartidorId, fecha);
+  if (!registro?.pagado_at) throw new ErrorNegocio(409, 'Todavía no está marcado como pagado.');
+  await ejecutar('UPDATE liquidaciones_reparto SET confirmado_at = ? WHERE id = ?', ahora(), registro.id);
+  await registrarEvento('liquidacion_reparto', repartidorId, 'confirmado', { fecha });
+  return calcularGananciaRepartidor(repartidorId, fecha);
+}
+
+export const pagosRepartoPorConfirmar = (repartidorId: string) => consultar<Fila>(
+  `SELECT to_char(fecha, 'YYYY-MM-DD') AS fecha, monto_total AS monto
+     FROM liquidaciones_reparto
+    WHERE repartidor_id = ? AND pagado_at IS NOT NULL AND confirmado_at IS NULL
+      AND fecha > CURRENT_DATE - 30
+    ORDER BY fecha DESC`, repartidorId);

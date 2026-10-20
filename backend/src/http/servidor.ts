@@ -21,6 +21,8 @@ import {
 } from '../dominio/consultas.ts';
 import {
   calcularLiquidacion, liquidacionesDelDia, marcarPagado, confirmarRecepcion, hoy,
+  calcularGananciaRepartidor, liquidacionesRepartoDelDia, marcarPagadoRepartidor,
+  confirmarPagoRepartidor, pagosRepartoPorConfirmar,
 } from '../dominio/liquidaciones.ts';
 import { ErrorNegocio, TransicionInvalida } from '../dominio/estados.ts';
 import { bus } from '../realtime/bus.ts';
@@ -870,8 +872,16 @@ GET('/repartidor/tablero', async (c) => {
   // antes esto no se devolvía: la pantalla lo adivinaba.
   const yo = await consultarUno<Fila>(
     'SELECT id, nombre, vehiculo, conectado, feria_id FROM repartidores WHERE id = ?', id);
+  const [ganancia, pagosPorConfirmar] = await Promise.all([
+    calcularGananciaRepartidor(id), pagosRepartoPorConfirmar(id),
+  ]);
   return {
     repartidor: yo,
+    // Lo que lleva ganado hoy y los pagos de otros días sin confirmar.
+    ganancia: { total: ganancia.total, cantidad: ganancia.cantidad, pagado: ganancia.pagado,
+                pendiente: ganancia.pendiente, fecha: ganancia.fecha,
+                pagadoAt: ganancia.pagadoAt, confirmadoAt: ganancia.confirmadoAt },
+    pagosPorConfirmar,
     viajeActivo: activo,
     // Con feria asignada ve solo los viajes de esa feria; sin
     // feria, reparte para todas.
@@ -916,7 +926,7 @@ GET('/operador/tablero', async (c) => {
   // Sin `?dia=` es hoy, que es lo que mira la app. El panel pide
   // días anteriores para comparar.
   const dia = diaPedido(c);
-  const [autogestion, m, liquidaciones, activos] = await Promise.all([
+  const [autogestion, m, liquidaciones, activos, liquidacionesReparto] = await Promise.all([
     colaAutogestion(),
     metricas(dia),
     liquidacionesDelDia(dia),
@@ -924,8 +934,9 @@ GET('/operador/tablero', async (c) => {
       `SELECT id, numero, estado, cliente_nombre, direccion, total_venta, creado_at
          FROM pedidos WHERE estado NOT IN ('ENTREGADO', 'CANCELADO')
         ORDER BY creado_at DESC`),
+    liquidacionesRepartoDelDia(dia),
   ]);
-  return { dia, autogestion, metricas: m, liquidaciones, activos };
+  return { dia, autogestion, metricas: m, liquidaciones, activos, liquidacionesReparto };
 });
 
 /**
@@ -1037,6 +1048,16 @@ POST('/operador/autogestion/:id/listo', async (c) => {
   await marcarListo(c.params.id);
   return { ok: true };
 });
+
+/** El operador anota que le pagó al repartidor lo del día. */
+POST('/operador/liquidaciones-reparto/:repartidorId/pagar', async (c) => {
+  await actor(c, 'operador');
+  return marcarPagadoRepartidor(c.params.repartidorId, fechaValida(c.cuerpo?.fecha));
+});
+
+/** El repartidor confirma que recibió el pago (de hoy o de otro día). */
+POST('/repartidor/liquidacion/confirmar', async (c) =>
+  confirmarPagoRepartidor(await actor(c, 'repartidor'), fechaValida(c.cuerpo?.fecha)));
 
 POST('/operador/liquidaciones/:ferianteId/pagar', async (c) => {
   await actor(c, 'operador');

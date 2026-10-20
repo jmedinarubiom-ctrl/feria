@@ -45,6 +45,8 @@ const paraLaApp = (f: Fila) => ({
   comuna: f.comuna,
   calle: f.calle,
   activa: f.activa,
+  ubicacion: Number.isFinite(f.lat) && Number.isFinite(f.lng)
+    ? { lat: f.lat, lng: f.lng, revisada: !!f.ubicacion_revisada } : null,
   horario: { dias: f.dias, abre: f.abre, ultimoPedido: f.ultimo_pedido, cierra: f.cierra },
   ...estadoFeria(new Date(), horarioDeFeria(f)),
 });
@@ -77,7 +79,22 @@ export async function feriasConGente() {
 
 export type CambioFeria = {
   activa?: boolean; dias?: number[]; abre?: string; ultimoPedido?: string; cierra?: string;
+  /** «-33.0265, -71.5500», o un enlace de Google Maps que las traiga. */
+  ubicacion?: string;
 };
+
+/** Lee coordenadas escritas a mano o copiadas de un enlace de mapa. */
+function leerUbicacion(texto: string): { lat: number; lng: number } {
+  const m = /(-?\d{1,2}[.,]\d{3,})\s*[,; ]\s*(-?\d{1,3}[.,]\d{3,})/.exec(texto);
+  const lat = m ? Number(m[1].replace(',', '.')) : NaN;
+  const lng = m ? Number(m[2].replace(',', '.')) : NaN;
+  // Región de Valparaíso, holgada.
+  if (!(lat > -34.2 && lat < -32.0 && lng > -72.2 && lng < -70.0)) {
+    throw new ErrorNegocio(422,
+      'Escribe la ubicación como «-33.0265, -71.5500» (o pega un enlace de Google Maps del lugar).');
+  }
+  return { lat, lng };
+}
 
 export async function actualizarFeria(id: string, cambio: CambioFeria) {
   const actual = await feriaPorId(id);
@@ -107,7 +124,18 @@ export async function actualizarFeria(id: string, cambio: CambioFeria) {
     }
   }
 
+  // La ubicación: desde ahí se mide y se cobra cada despacho.
+  let lat = actual.lat, lng = actual.lng, revisada = !!actual.ubicacion_revisada;
+  if (typeof cambio.ubicacion === 'string' && cambio.ubicacion.trim()) {
+    ({ lat, lng } = leerUbicacion(cambio.ubicacion));
+    revisada = true;
+  }
+
   const activa = cambio.activa ?? actual.activa;
+  if (activa && !actual.activa && !revisada) {
+    throw new ErrorNegocio(409,
+      'Confirma primero la ubicación de la feria: el despacho se cobra por distancia desde ahí.');
+  }
   if (activa && !actual.activa) {
     // Encender una feria sin nadie que venda en ella manda cada
     // pedido derecho a la cola del operador.
@@ -120,8 +148,9 @@ export async function actualizarFeria(id: string, cambio: CambioFeria) {
   }
 
   await ejecutar(
-    `UPDATE ferias SET activa = ?, dias = ?, abre = ?, ultimo_pedido = ?, cierra = ? WHERE id = ?`,
-    activa, dias, abre, ultimo, cierra, id);
+    `UPDATE ferias SET activa = ?, dias = ?, abre = ?, ultimo_pedido = ?, cierra = ?,
+            lat = ?, lng = ?, ubicacion_revisada = ? WHERE id = ?`,
+    activa, dias, abre, ultimo, cierra, lat, lng, revisada, id);
   if (activa !== actual.activa) {
     await registrarEvento('feria', id, activa ? 'abierta a pedidos' : 'cerrada a pedidos');
   }

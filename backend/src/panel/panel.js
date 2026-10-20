@@ -646,6 +646,45 @@ function vistaLiquidaciones() {
             </tr>`).join('')}
         </tbody>
       </table></div>`}
+    </div>
+    ${vistaPagoRepartidores()}`;
+}
+
+/** Lo que se le paga a cada repartidor: la tarifa de cada viaje que hizo. */
+function vistaPagoRepartidores() {
+  const r = datos.tablero?.liquidacionesReparto;
+  if (!r) return '';
+  return `
+    <div class="fila" style="justify-content:space-between;margin:28px 0 12px">
+      <h2>Repartidores</h2>
+      <span class="cifra">${clp(r.totalAPagar)}</span>
+    </div>
+    <div class="tarjeta" style="padding:0;overflow:hidden">
+      ${r.repartidores.length === 0 ? '<div class="vacio">Nadie entregó pedidos ese día.</div>' : `
+      <div class="tabla"><table>
+        <thead><tr>
+          <th>Repartidor</th><th class="num">Viajes</th><th class="num">Ganó</th>
+          <th class="num">Pagado</th><th class="num">Pendiente</th><th>Estado</th><th></th>
+        </tr></thead>
+        <tbody>
+          ${r.repartidores.map((x) => `
+            <tr>
+              <td><strong>${esc(x.nombre)}</strong><br>
+                  <span class="suave">${esc(x.vehiculo)} · ${esc(x.telefono)}</span></td>
+              <td class="num">${x.cantidad}</td>
+              <td class="num">${clp(x.total)}</td>
+              <td class="num">${clp(x.pagado)}</td>
+              <td class="num"><strong>${clp(x.pendiente)}</strong></td>
+              <td>${x.confirmado_at ? '<span class="chip exito">confirmó</span>'
+                   : x.pagado_at ? '<span class="chip aviso">esperando que confirme</span>'
+                   : '<span class="chip">sin pagar</span>'}</td>
+              <td class="num">${x.pendiente > 0
+                ? `<button class="accion" data-pagar-rep="${esc(x.id)}"
+                     data-nombre="${esc(x.nombre)}" data-monto="${x.pendiente}">
+                     Pagué ${clp(x.pendiente)}</button>` : ''}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>`}
     </div>`;
 }
 
@@ -839,11 +878,14 @@ function vistaFerias() {
       Las que están «repartiendo» reciben pedidos; las demás el cliente las ve como
       «próximamente». Para abrir una, primero cárgale feriantes en Gente. Días y horarios
       vienen del localizador de ferias de ODEPA: confírmalos con cada feria.
+      La ubicación es desde donde se mide y se cobra cada despacho: las que dicen
+      «aproximada» hay que corregirlas (pega las coordenadas desde Google Maps:
+      clic derecho sobre el lugar) y guardar. Sin ubicación confirmada la feria no se abre.
     </p>
     <div class="tarjeta" style="padding:0;overflow:hidden">
       <div class="tabla"><table>
         <thead><tr><th>Feria</th><th>Días</th><th>Abre</th><th>Último pedido</th><th>Cierra</th>
-                   <th class="num">Feriantes</th><th>Repartiendo</th><th></th></tr></thead>
+                   <th class="num">Feriantes</th><th>Ubicación</th><th>Repartiendo</th><th></th></tr></thead>
         <tbody>
           ${ferias.map((f) => `
             <tr data-fila-feria="${esc(f.id)}">
@@ -857,9 +899,14 @@ function vistaFerias() {
               <td><input type="time" data-hora="ultimoPedido" value="${esc(f.horario.ultimoPedido)}"></td>
               <td><input type="time" data-hora="cierra" value="${esc(f.horario.cierra)}"></td>
               <td class="num">${f.feriantes}</td>
+              <td><input data-ubicacion style="width:150px" placeholder="-33.0265, -71.5500"
+                         data-original="${f.ubicacion?.revisada ? `${f.ubicacion.lat}, ${f.ubicacion.lng}` : ''}"
+                         value="${f.ubicacion ? `${f.ubicacion.lat}, ${f.ubicacion.lng}` : ''}">
+                  <br><span class="suave" style="font-size:12px">${f.ubicacion?.revisada
+                    ? '✓ confirmada' : f.ubicacion ? 'aproximada: confírmala' : 'falta'}</span></td>
               <td><input type="checkbox" data-feria-activa="${esc(f.id)}" ${f.activa ? 'checked' : ''}></td>
               <td class="num"><button class="accion secundario" data-guardar-feria="${esc(f.id)}">
-                Guardar horario</button></td>
+                Guardar</button></td>
             </tr>`).join('')}
         </tbody>
       </table></div>
@@ -1185,7 +1232,13 @@ function conectar() {
     return accion(() => api('POST', `/operador/ferias/${id}`, {
       dias: [...fila.querySelectorAll('[data-dia]:checked')].map((el) => Number(el.dataset.dia)),
       abre: hora('abre'), ultimoPedido: hora('ultimoPedido'), cierra: hora('cierra'),
-    }), 'Horario guardado.');
+      // La ubicación se manda solo si cambió o si falta confirmarla:
+      // guardar un horario no tiene por qué tocarla.
+      ...(() => {
+        const campo = fila.querySelector('[data-ubicacion]');
+        return campo.value.trim() !== campo.dataset.original ? { ubicacion: campo.value } : {};
+      })(),
+    }), 'Feria guardada.');
   });
 
   // ---- Reembolsos ----
@@ -1203,6 +1256,13 @@ function conectar() {
   });
 
   // ---- Liquidaciones ----
+  en('[data-pagar-rep]', 'click', (e) => {
+    const { pagarRep, nombre, monto } = e.currentTarget.dataset;
+    if (!confirm(`¿Le pagaste ${clp(Number(monto))} a ${nombre}?`)) return;
+    return accion(() => api('POST', `/operador/liquidaciones-reparto/${pagarRep}/pagar`,
+                            { fecha: datos.dia ?? hoyISO() }),
+                  'Anotado. Falta que lo confirme desde su teléfono.');
+  });
   en('[data-pagar]', 'click', (e) => {
     const { pagar, nombre, monto } = e.currentTarget.dataset;
     if (!confirm(`¿Le pagaste ${clp(Number(monto))} en efectivo a ${nombre}?`)) return;
